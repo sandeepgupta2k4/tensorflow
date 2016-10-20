@@ -1,4 +1,3 @@
-# pylint: disable=g-bad-file-header
 # Copyright 2016 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,15 +23,10 @@ Train and evaluate TensorFlow models.
 @@BaseEstimator
 @@Estimator
 @@ModeKeys
-@@TensorFlowClassifier
-@@TensorFlowDNNClassifier
-@@TensorFlowDNNRegressor
-@@TensorFlowEstimator
-@@TensorFlowLinearClassifier
-@@TensorFlowLinearRegressor
-@@TensorFlowRNNClassifier
-@@TensorFlowRNNRegressor
-@@TensorFlowRegressor
+@@DNNClassifier
+@@DNNRegressor
+@@LinearClassifier
+@@LinearRegressor
 
 ## Graph actions
 

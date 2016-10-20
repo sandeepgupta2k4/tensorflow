@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <cmath>
 #include <functional>
+#include <typeinfo>
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 #include "tensorflow/core/framework/numeric_types.h"
 #include "tensorflow/core/framework/tensor_types.h"
@@ -35,13 +36,30 @@ struct scalar_fmod2_op {
     return std::fmod(a, b);
   }
 };
-
 template <typename T>
 struct functor_traits<scalar_fmod2_op<T>> {
   enum {
     Cost = 13,  // Reciprocal throughput of FPREM on Haswell.
     PacketAccess = false,
   };
+};
+
+// TODO(rmlarsen): This is a workaround for upstream change
+// https://bitbucket.org/eigen/eigen/commits/f339468d04d0f87caeb6cab9aef568627e9f6ea9
+// that renamed scalar_binary_pow_op to scalar_pow_op and deleted the unary
+// version of the latter. Remove once we upgrade to Eigen 3.3.
+template <typename Scalar, typename Exponent>
+struct scalar_binary_pow_op_google {
+  EIGEN_EMPTY_STRUCT_CTOR(scalar_binary_pow_op_google)
+  EIGEN_DEVICE_FUNC inline Scalar operator()(const Scalar& a,
+                                             const Exponent& b) const {
+    return numext::pow(a, b);
+  }
+};
+
+template <typename Scalar, typename Exponent>
+struct functor_traits<scalar_binary_pow_op_google<Scalar, Exponent>> {
+  enum { Cost = 5 * NumTraits<Scalar>::MulCost, PacketAccess = false };
 };
 
 template <typename T, typename DivOrMod>
@@ -68,7 +86,7 @@ struct safe_div_or_mod_op {
 template <typename T, typename DivOrMod>
 struct functor_traits<safe_div_or_mod_op<T, DivOrMod>> {
   enum {
-    Cost = NumTraits<T>::template Div<false>::Cost,
+    Cost = scalar_div_cost<T, false>::value,
     PacketAccess = false,
   };
 };
@@ -218,6 +236,48 @@ struct functor_traits<scalar_compose_op<Scalar, UnaryFunctor, BinaryFunctor>> {
                    functor_traits<BinaryFunctor>::PacketAccess
   };
 };
+
+#if EIGEN_COMP_GNUC && __cplusplus > 199711L
+#define DISABLE_FLOAT_EQUALITY_WARNING \
+  _Pragma("GCC diagnostic push")       \
+      _Pragma("GCC diagnostic ignored \"-Wfloat-equal\"")
+#define ENABLE_FLOAT_EQUALITY_WARNING _Pragma("GCC diagnostic pop")
+#else
+#define DISABLE_FLOAT_EQUALITY_WARNING
+#define ENABLE_FLOAT_EQUALITY_WARNING
+#endif
+
+template <typename Scalar>
+struct scalar_round_op_google {
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const Scalar
+  operator()(const Scalar& x) const {
+    EIGEN_STATIC_ASSERT((!NumTraits<Scalar>::IsComplex),
+                        NUMERIC_TYPE_MUST_BE_REAL)
+
+    Scalar round_val;
+    round_val = Eigen::numext::floor(x);
+    const Scalar fraction = x - round_val;
+    if (fraction > Scalar(.5)) {
+      round_val += Scalar(1.0);
+    } else if (fraction == Scalar(.5)) {
+      const Scalar nearest_even_int =
+          round_val - Scalar(2) * Eigen::numext::floor(Scalar(.5) * x);
+      bool is_odd = (nearest_even_int == Scalar(1));
+      if (is_odd) {
+        round_val += Scalar(1);
+      }
+    }
+    return round_val;
+  }
+};
+
+template <typename Scalar>
+struct functor_traits<scalar_round_op_google<Scalar>> {
+  enum { Cost = 4 * NumTraits<Scalar>::AddCost, PacketAccess = false };
+};
+
+#undef ENABLE_FLOAT_EQUALITY_WARNING
+#undef DISABLE_FLOAT_EQUALITY_WARNING
 
 }  // end namespace internal
 }  // end namespace Eigen
@@ -369,61 +429,23 @@ struct logical_not : base<bool, Eigen::internal::scalar_boolean_not_op<bool> > {
 // NOTE: std::isinf, std::isnan, std::isfinite are plain function.
 // Therefore we need to wrap them in functors to be used with Eigen's
 // type system.
+template <typename T>
+struct isinf : base<T, Eigen::internal::scalar_isinf_op<T>, bool> {};
 
 template <typename T>
-struct isinf_func {
-  typedef bool result_type;
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE bool operator()(T x) const {
-    return Eigen::numext::isinf(x);
-  }
-};
+struct isnan : base<T, Eigen::internal::scalar_isnan_op<T>, bool> {};
 
 template <typename T>
-struct isinf : base<T, isinf_func<T>, bool> {};
+struct isfinite : base<T, Eigen::internal::scalar_isfinite_op<T>, bool> {};
 
 template <typename T>
-struct isnan_func {
-  typedef bool result_type;
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE bool operator()(T x) const {
-    return Eigen::numext::isnan(x);
-  }
-};
+struct floor : base<T, Eigen::internal::scalar_floor_op<T>> {};
 
 template <typename T>
-struct isnan : base<T, isnan_func<T>, bool> {};
+struct round : base<T, Eigen::internal::scalar_round_op_google<T>> {};
 
 template <typename T>
-struct isfinite_func {
-  typedef bool result_type;
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE bool operator()(T x) const {
-    return Eigen::numext::isfinite(x);
-  }
-};
-
-template <typename T>
-struct isfinite : base<T, isfinite_func<T>, bool> {};
-
-template <typename T>
-struct floor_func {
-  typedef T result_type;
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE T operator()(T x) const {
-    return Eigen::numext::floor(x);
-  }
-};
-
-template <typename T>
-struct floor : base<T, floor_func<T> > {};
-
-template <typename T>
-struct ceil_func {
-  typedef T result_type;
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE T operator()(T x) const {
-    return Eigen::numext::ceil(x);
-  }
-};
-
-template <typename T>
-struct ceil : base<T, ceil_func<T> > {};
+struct ceil : base<T, Eigen::internal::scalar_ceil_op<T>> {};
 
 ////////////////////////////////////////////////////////////////////////////////
 // Binary functors
@@ -477,7 +499,7 @@ struct safe_mod : base<T, Eigen::internal::safe_div_or_mod_op<
 };
 
 template <typename T>
-struct pow : base<T, Eigen::internal::scalar_binary_pow_op<T, T> > {};
+struct pow : base<T, Eigen::internal::scalar_binary_pow_op_google<T, T>> {};
 
 template <typename T>
 struct maximum : base<T, Eigen::internal::scalar_max_op<T> > {};

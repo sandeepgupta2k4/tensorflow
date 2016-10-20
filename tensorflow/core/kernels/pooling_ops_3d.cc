@@ -1,4 +1,4 @@
-/* Copyright 2016 Google Inc. All Rights Reserved.
+/* Copyright 2016 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -102,8 +102,8 @@ class Pooling3DOp : public UnaryOp<T> {
     // Dimension order for these arrays is: x, y, z.
     std::array<int64, 3> input_size{
         {tensor_in.dim_size(3), tensor_in.dim_size(2), tensor_in.dim_size(1)}};
-    std::array<int64, 3> window({{ksize_[3], ksize_[2], ksize_[1]}});
-    std::array<int64, 3> stride({{stride_[3], stride_[2], stride_[1]}});
+    std::array<int64, 3> window{{ksize_[3], ksize_[2], ksize_[1]}};
+    std::array<int64, 3> stride{{stride_[3], stride_[2], stride_[1]}};
     std::array<int64, 3> padding, out;
 
     OP_REQUIRES_OK(context, Get3dOutputSize(input_size, window, stride,

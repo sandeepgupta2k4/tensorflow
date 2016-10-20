@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the 'License');
 you may not use this file except in compliance with the License.
@@ -16,12 +16,13 @@ module TF.Backend {
   export type RunTagUrlFn = (tag: string, run: string) => string;
 
   export interface Router {
+    logdir: () => string;
     runs: () => string;
     scalars: RunTagUrlFn;
     histograms: RunTagUrlFn;
     compressedHistograms: RunTagUrlFn;
     images: RunTagUrlFn;
-    individualImage: (query: string) => string;
+    individualImage: (query: string, wallTime: number) => string;
     audio: RunTagUrlFn;
     individualAudio: (query: string) => string;
     graph: (run: string, limit_attr_size?: number, large_attrs_key?: string)
@@ -39,22 +40,23 @@ module TF.Backend {
     if (dataDir[dataDir.length - 1] === '/') {
       dataDir = dataDir.slice(0, dataDir.length - 1);
     }
-    function standardRoute(route: string):
+    function standardRoute(route: string, demoExtension = '.json'):
         ((tag: string, run: string) => string) {
       return function(tag: string, run: string): string {
         var url =
             dataDir + '/' + route + clean(queryEncoder({tag: tag, run: run}));
         if (demoMode) {
-          url += '.json';
+          url += demoExtension;
         }
         return url;
       };
     }
-    function individualImageUrl(query: string) {
+    function individualImageUrl(query: string, wallTime: number) {
       var url = dataDir + '/' + clean('individualImage?' + query);
-      if (demoMode) {
-        url += '.png';
-      }
+      // Include wall_time just to disambiguate the URL and force the browser
+      // to reload the image when the URL changes. The backend doesn't care
+      // about the value.
+      url += demoMode ? '.png' : '&ts=' + wallTime;
       return url;
     }
     function individualAudioUrl(query: string) {
@@ -85,6 +87,7 @@ module TF.Backend {
       return url;
     }
     return {
+      logdir: () => dataDir + '/logdir',
       runs: () => dataDir + '/runs' + (demoMode ? '.json' : ''),
       individualImage: individualImageUrl,
       individualAudio: individualAudioUrl,
@@ -94,7 +97,7 @@ module TF.Backend {
       compressedHistograms: standardRoute('compressedHistograms'),
       images: standardRoute('images'),
       audio: standardRoute('audio'),
-      runMetadata: standardRoute('run_metadata'),
+      runMetadata: standardRoute('run_metadata', '.pbtxt'),
     };
   };
 }

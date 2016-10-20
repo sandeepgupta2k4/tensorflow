@@ -1,4 +1,4 @@
-/* Copyright 2016 Google Inc. All Rights Reserved.
+/* Copyright 2016 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ limitations under the License.
 syntax = "proto3";
 
 package tensorflow;
-// option cc_enable_arenas = true;
+option cc_enable_arenas = true;
 option java_outer_classname = "WorkerProtos";
 option java_multiple_files = true;
 option java_package = "org.tensorflow.distruntime";
@@ -129,6 +129,8 @@ message CleanupAllResponse {
 // The worker executes all subgraphs registered under graph_handle.
 // RunGraph returns after the execution finishes or an error is
 // encountered.
+// A sequence of RunGraphRequests with is_partial may be sent to RunGraph for
+// partial graph execution.
 //
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -169,6 +171,9 @@ message RunGraphRequest {
   // fetches the keys into `RunGraphResponse.recv` after the run.
   repeated NamedTensor send = 3;
   repeated string recv_key = 4;
+
+  // True if the RunGraphRequest is a partial run request.
+  bool is_partial = 6;
 }
 
 message RunGraphResponse {

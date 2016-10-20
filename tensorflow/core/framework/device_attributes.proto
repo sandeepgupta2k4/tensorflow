@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 package tensorflow;
-// option cc_enable_arenas = true;
+option cc_enable_arenas = true;
 option java_outer_classname = "DeviceAttributesProtos";
 option java_multiple_files = true;
 option java_package = "org.tensorflow.framework";
@@ -19,6 +19,7 @@ enum BusAdjacency {
 };
 
 message DeviceAttributes {
+  // Fully specified name of the device within a cluster.
   string name = 1;
 
   // String representation of device_type.

@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -28,6 +28,13 @@ class TensorTestHelper {
   // This is an operation that can be done by VariableOp.
   static void set_shape(Tensor* t, const TensorShape& s) { t->set_shape(s); }
 };
+
+// To make TestCopies do the right thing.
+inline bool operator==(const ResourceHandle& a, const ResourceHandle& b) {
+  return a.device() == b.device() && a.container() == b.container() &&
+         a.name() == b.name() && a.hash_code() == b.hash_code() &&
+         a.maybe_type_name() == b.maybe_type_name();
+}
 
 TEST(TensorTest, Default) {
   Tensor t;
@@ -124,6 +131,8 @@ void TestCopies(const Tensor& t) {
     LOG(INFO) << "Move assignment";
     Tensor t2 = t;
     Tensor t3 = std::move(t2);
+    Tensor* t4 = &t3;
+    *t4 = std::move(t3);
     test::ExpectTensorEqual<T>(t, t3);
     EXPECT_TRUE(t3.IsInitialized());
     EXPECT_FALSE(t2.IsInitialized());
@@ -139,6 +148,14 @@ TEST(Tensor_Float, Simple) {
     }
   }
   TestCopies<float>(t);
+}
+
+TEST(Tensor_ResourceHandle, Simple) {
+  Tensor t(DT_RESOURCE, TensorShape({}));
+  ResourceHandle tmp;
+  tmp.set_name("a");
+  t.flat<ResourceHandle>()(0) = tmp;
+  TestCopies<ResourceHandle>(t);
 }
 
 TEST(Tensor_UInt16, Simple) {
@@ -639,6 +656,67 @@ TEST(Tensor_Complex, SimpleWithHelper128) {
   }
 }
 
+namespace {
+
+// An allocator that always returns nullptr, for testing
+// failures to allocate.
+class DummyCPUAllocator : public Allocator {
+ public:
+  DummyCPUAllocator() {}
+  string Name() override { return "cpu"; }
+  void* AllocateRaw(size_t alignment, size_t num_bytes) override {
+    return nullptr;
+  }
+  void DeallocateRaw(void* ptr) override { return; }
+};
+
+}  // namespace
+
+TEST(Tensor, FailureToAllocate) {
+  TensorShape shape({1});
+  DummyCPUAllocator allocator;
+  {
+    Tensor a(&allocator, DT_FLOAT, shape);
+    ASSERT_FALSE(a.IsInitialized());
+  }
+
+  // Float
+  {
+    Tensor t(DT_FLOAT, TensorShape({1}));
+    t.vec<float>()(0) = 1.0;
+    TensorProto proto;
+    t.AsProtoField(&proto);
+
+    // FromProto should fail nicely.
+    Tensor a(&allocator, DT_FLOAT, TensorShape({1}));
+    ASSERT_FALSE(a.FromProto(&allocator, proto));
+  }
+
+  // String
+  {
+    Tensor t(DT_STRING, TensorShape({1}));
+    t.vec<string>()(0) = "foo";
+    TensorProto proto;
+    t.AsProtoField(&proto);
+
+    // FromProto should fail nicely.
+    Tensor a(&allocator, DT_STRING, TensorShape({1}));
+    ASSERT_FALSE(a.FromProto(&allocator, proto));
+  }
+
+  // Half
+  {
+    Tensor t(DT_HALF, TensorShape({1}));
+    t.vec<Eigen::half>()(0) = Eigen::half(1.0);
+    TensorProto proto;
+    t.AsProtoField(&proto);
+
+    // FromProto should fail nicely.
+    Tensor a(&allocator, DT_HALF, TensorShape({1}));
+    ASSERT_FALSE(a.FromProto(&allocator, proto));
+  }
+}
+
 // On the alignment.
 //
 // As of 2015/8, tensorflow::Tensor allocates its buffer with 32-byte
@@ -711,7 +789,7 @@ TEST(Tensor, Slice_Basic) {
 
     // Take an unaligned slice.
     Tensor y = x.Slice(1, 13);
-#if EIGEN_ALIGN == 1
+#if EIGEN_MAX_ALIGN_BYTES > 0
     EXPECT_FALSE(y.IsAligned());
 #endif
     y.unaligned_flat<float>().setConstant(1.0);

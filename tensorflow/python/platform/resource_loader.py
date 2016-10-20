@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,8 +23,6 @@ import inspect
 import os.path
 import sys
 
-from tensorflow.python.platform import tf_logging as logging
-
 
 def load_resource(path):
   """Load the resource at given path, where path is relative to tensorflow/.
@@ -43,12 +41,8 @@ def load_resource(path):
           os.path.dirname(__file__), os.pardir, os.pardir))
   path = os.path.join(tensorflow_root, path)
   path = os.path.abspath(path)
-  try:
-    with open(path, 'rb') as f:
-      return f.read()
-  except IOError as e:
-    logging.warning('IOError %s on path %s', e, path)
-    raise e
+  with open(path, 'rb') as f:
+    return f.read()
 
 
 # pylint: disable=protected-access

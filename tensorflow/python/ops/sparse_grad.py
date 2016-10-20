@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,9 +25,11 @@ from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import sparse_ops
 
 
-ops.NoGradient("SparseAddGrad")
-ops.NoGradient("SparseConcat")
-ops.NoGradient("SparseToDense")
+# TODO(b/31222613): This op may be differentiable, and there may be
+# latent bugs here.
+ops.NotDifferentiable("SparseAddGrad")
+ops.NotDifferentiable("SparseConcat")
+ops.NotDifferentiable("SparseToDense")
 
 
 @ops.RegisterGradient("SparseReorder")
@@ -256,3 +258,15 @@ def _SparseSoftmaxGrad(op, grad):
 
   grad_x = sp_sum.values * sp_output.values
   return [None, grad_x, None]
+
+
+@ops.RegisterGradient("SparseSparseMaximum")
+def _SparseSparseMaximumGrad(unused_op, unused_grad):
+  raise NotImplementedError("Gradient for SparseSparseMaximum is currently not"
+                            " implemented yet.")
+
+
+@ops.RegisterGradient("SparseSparseMinimum")
+def _SparseSparseMinimumGrad(unused_op, unused_grad):
+  raise NotImplementedError("Gradient for SparseSparseMinimum is currently not"
+                            " implemented yet.")

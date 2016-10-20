@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,17 +13,32 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
+#include "tensorflow/core/framework/resource_handle.pb.h"
+#include "tensorflow/core/framework/resource_mgr.h"
 #include "tensorflow/core/lib/core/status.h"
 
 namespace tensorflow {
 
-REGISTER_OP("KernelLabel").Output("result: string");
+REGISTER_OP("KernelLabel")
+    .Output("result: string")
+    .SetShapeFn(shape_inference::ScalarShape);
 
 REGISTER_OP("GraphDefVersion").Output("version: int32").SetIsStateful();
 
 REGISTER_OP("Old").Deprecated(8, "For reasons");
+
+REGISTER_OP("ResourceOp")
+    .Output("resource: resource")
+    .Attr("container: string = ''")
+    .Attr("shared_name: string")
+    .SetShapeFn(shape_inference::ScalarShape);
+
+REGISTER_OP("ResourceUsingOp")
+    .Input("resource: resource")
+    .SetShapeFn(shape_inference::UnknownShape);
 
 namespace {
 enum KernelLabel { DEFAULT_LABEL, OVERLOAD_1_LABEL, OVERLOAD_2_LABEL };
@@ -89,5 +104,42 @@ class OldOp : public OpKernel {
 };
 
 REGISTER_KERNEL_BUILDER(Name("Old").Device(DEVICE_CPU), OldOp);
+
+// Stubbed-out resource to test resource handle ops.
+class StubResource : public ResourceBase {
+ public:
+  string DebugString() override { return ""; }
+};
+
+// Constructs and returns a resource handle.
+class ResourceOp : public OpKernel {
+ public:
+  explicit ResourceOp(OpKernelConstruction* context) : OpKernel(context) {}
+
+  void Compute(OpKernelContext* ctx) override {
+    Tensor* output = nullptr;
+    OP_REQUIRES_OK(ctx, ctx->allocate_output(0, TensorShape({}), &output));
+    output->flat<ResourceHandle>()(0) =
+        MakeResourceHandle<StubResource>(ctx, "container", "name");
+  }
+};
+
+REGISTER_KERNEL_BUILDER(Name("ResourceOp").Device(DEVICE_CPU), ResourceOp);
+
+// Uses a ResourceHandle to check its validity.
+class ResourceUsingOp : public OpKernel {
+ public:
+  explicit ResourceUsingOp(OpKernelConstruction* context) : OpKernel(context) {}
+
+  void Compute(OpKernelContext* ctx) {
+    const Tensor& pointer = ctx->input(0);
+    auto* r = new StubResource;
+    OP_REQUIRES_OK(ctx, CreateResource<StubResource>(
+                            ctx, pointer.flat<ResourceHandle>()(0), r));
+  }
+};
+
+REGISTER_KERNEL_BUILDER(Name("ResourceUsingOp").Device(DEVICE_CPU),
+                        ResourceUsingOp);
 
 }  // end namespace tensorflow
