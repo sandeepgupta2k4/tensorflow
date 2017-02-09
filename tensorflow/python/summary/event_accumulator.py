@@ -18,7 +18,8 @@ from __future__ import division
 from __future__ import print_function
 
 import collections
-import os.path
+import os
+import re
 import threading
 
 import numpy as np
@@ -27,14 +28,20 @@ from tensorflow.core.framework import graph_pb2
 from tensorflow.core.protobuf import meta_graph_pb2
 from tensorflow.core.protobuf.config_pb2 import RunMetadata
 from tensorflow.core.util.event_pb2 import SessionLog
+from tensorflow.python.framework import tensor_util
 from tensorflow.python.platform import tf_logging as logging
+from tensorflow.python.summary import summary
 from tensorflow.python.summary.impl import directory_watcher
-from tensorflow.python.summary.impl import io_wrapper
+from tensorflow.python.summary.impl import event_file_loader
 from tensorflow.python.summary.impl import reservoir
 from tensorflow.python.util import compat
 
 namedtuple = collections.namedtuple
 ScalarEvent = namedtuple('ScalarEvent', ['wall_time', 'step', 'value'])
+
+HealthPillEvent = namedtuple(
+    'HealthPillEvent',
+    ['wall_time', 'step', 'node_name', 'output_slot', 'value'])
 
 CompressedHistogramEvent = namedtuple('CompressedHistogramEvent',
                                       ['wall_time', 'step',
@@ -71,6 +78,7 @@ HISTOGRAMS = 'histograms'
 IMAGES = 'images'
 AUDIO = 'audio'
 SCALARS = 'scalars'
+HEALTH_PILLS = 'health_pills'
 GRAPH = 'graph'
 META_GRAPH = 'meta_graph'
 RUN_METADATA = 'run_metadata'
@@ -85,6 +93,8 @@ DEFAULT_SIZE_GUIDANCE = {
     IMAGES: 4,
     AUDIO: 4,
     SCALARS: 10000,
+    # We store this many health pills per op.
+    HEALTH_PILLS: 100,
     HISTOGRAMS: 1,
 }
 
@@ -93,12 +103,30 @@ STORE_EVERYTHING_SIZE_GUIDANCE = {
     IMAGES: 0,
     AUDIO: 0,
     SCALARS: 0,
+    HEALTH_PILLS: 0,
     HISTOGRAMS: 0,
 }
 
+# The tag that values containing health pills have. Health pill data is stored
+# in tensors. In order to distinguish health pill values from scalar values, we
+# rely on how health pill values have this special tag value.
+_HEALTH_PILL_EVENT_TAG = '__health_pill__'
+
 
 def IsTensorFlowEventsFile(path):
-  """Check the path name to see if it is probably a TF Events file."""
+  """Check the path name to see if it is probably a TF Events file.
+
+  Args:
+    path: A file path to check if it is an event file.
+
+  Raises:
+    ValueError: If the path is an empty string.
+
+  Returns:
+    If path is formatted like a TensorFlowEventsFile.
+  """
+  if not path:
+    raise ValueError('Path must be a nonempty string')
   return 'tfevents' in compat.as_str_any(os.path.basename(path))
 
 
@@ -127,6 +155,7 @@ class EventAccumulator(object):
   @@Reload
   @@Tags
   @@Scalars
+  @@HealthPills
   @@Graph
   @@MetaGraph
   @@RunMetadata
@@ -167,13 +196,19 @@ class EventAccumulator(object):
 
     self._first_event_timestamp = None
     self._scalars = reservoir.Reservoir(size=sizes[SCALARS])
+
+    # Unlike the other reservoir, the reservoir for health pills is keyed by the
+    # name of the op instead of the tag. This lets us efficiently obtain the
+    # health pills per node.
+    self._health_pills = reservoir.Reservoir(size=sizes[HEALTH_PILLS])
+
     self._graph = None
     self._graph_from_metagraph = False
     self._meta_graph = None
     self._tagged_metadata = {}
     self._histograms = reservoir.Reservoir(size=sizes[HISTOGRAMS])
     self._compressed_histograms = reservoir.Reservoir(
-        size=sizes[COMPRESSED_HISTOGRAMS])
+        size=sizes[COMPRESSED_HISTOGRAMS], always_keep_last=False)
     self._images = reservoir.Reservoir(size=sizes[IMAGES])
     self._audio = reservoir.Reservoir(size=sizes[AUDIO])
 
@@ -190,6 +225,7 @@ class EventAccumulator(object):
     # The attributes that get built up by the accumulator
     self.accumulated_attrs = ('_scalars', '_histograms',
                               '_compressed_histograms', '_images', '_audio')
+    self._tensor_summaries = {}
 
   def Reload(self):
     """Loads all events added since the last call to `Reload`.
@@ -261,6 +297,7 @@ class EventAccumulator(object):
                       'newest event.'))
       self._graph = event.graph_def
       self._graph_from_metagraph = False
+      self._UpdateTensorSummaries()
     elif event.HasField('meta_graph_def'):
       if self._meta_graph is not None:
         logging.warn(('Found more than one metagraph event per run. '
@@ -278,6 +315,7 @@ class EventAccumulator(object):
                           'graph with the newest metagraph version.'))
           self._graph_from_metagraph = True
           self._graph = meta_graph.graph_def.SerializeToString()
+          self._UpdateTensorSummaries()
     elif event.HasField('tagged_run_metadata'):
       tag = event.tagged_run_metadata.tag
       if tag in self._tagged_metadata:
@@ -286,11 +324,106 @@ class EventAccumulator(object):
       self._tagged_metadata[tag] = event.tagged_run_metadata.run_metadata
     elif event.HasField('summary'):
       for value in event.summary.value:
-        for summary_type, summary_func in SUMMARY_TYPES.items():
-          if value.HasField(summary_type):
-            datum = getattr(value, summary_type)
-            getattr(self, summary_func)(value.tag, event.wall_time,
-                                        event.step, datum)
+        if value.HasField('tensor'):
+          if value.tag == _HEALTH_PILL_EVENT_TAG:
+            self._ProcessHealthPillSummary(value, event)
+          else:
+            self._ProcessTensorSummary(value, event)
+        else:
+          for summary_type, summary_func in SUMMARY_TYPES.items():
+            if value.HasField(summary_type):
+              datum = getattr(value, summary_type)
+              getattr(self, summary_func)(value.tag, event.wall_time,
+                                          event.step, datum)
+
+  def _ProcessTensorSummary(self, value, event):
+    """Process summaries generated by the TensorSummary op.
+
+    These summaries are distinguished by the fact that they have a Tensor field,
+    rather than one of the old idiosyncratic per-summary data fields.
+
+    Processing Tensor summaries is complicated by the fact that Tensor summaries
+    are not self-descriptive; you need to read the NodeDef of the corresponding
+    TensorSummary op to know the summary_type, the tag, etc.
+
+    This method emits ERROR-level messages to the logs if it encounters Tensor
+    summaries that it cannot process.
+
+    Args:
+      value: A summary_pb2.Summary.Value with a Tensor field.
+      event: The event_pb2.Event containing that value.
+    """
+
+    def LogErrorOnce(msg):
+      logging.log_first_n(logging.ERROR, msg, 1)
+
+    name = value.node_name
+    if self._graph is None:
+      LogErrorOnce('Attempting to process TensorSummary output, but '
+                   'no graph is present, so processing is impossible. '
+                   'All TensorSummary output will be ignored.')
+      return
+
+    if name not in self._tensor_summaries:
+      LogErrorOnce('No node_def for TensorSummary {}; skipping this sequence.'.
+                   format(name))
+      return
+
+    summary_description = self._tensor_summaries[name]
+    type_hint = summary_description.type_hint
+
+    if not type_hint:
+      LogErrorOnce('No type_hint for TensorSummary {}; skipping this sequence.'.
+                   format(name))
+      return
+
+    if type_hint == 'scalar':
+      scalar = float(tensor_util.MakeNdarray(value.tensor))
+      self._ProcessScalar(name, event.wall_time, event.step, scalar)
+    else:
+      LogErrorOnce(
+          'Unsupported type {} for TensorSummary {}; skipping this sequence.'.
+          format(type_hint, name))
+
+  def _ProcessHealthPillSummary(self, value, event):
+    """Process summaries containing health pills.
+
+    These summaries are distinguished by the fact that they have a Tensor field
+    and have a special tag value.
+
+    This method emits ERROR-level messages to the logs if it encounters Tensor
+    summaries that it cannot process.
+
+    Args:
+      value: A summary_pb2.Summary.Value with a Tensor field.
+      event: The event_pb2.Event containing that value.
+    """
+    elements = np.fromstring(value.tensor.tensor_content, dtype=np.float64)
+
+    # The node_name property of the value object is actually a watch key: a
+    # combination of node name, output slot, and a suffix. We capture the
+    # actual node name and the output slot with a regular expression.
+    match = re.match(r'^(.*):(\d+):DebugNumericSummary$', value.node_name)
+    if not match:
+      logging.log_first_n(
+          logging.ERROR,
+          'Unsupported watch key %s for health pills; skipping this sequence.',
+          1,
+          value.node_name)
+      return
+
+    node_name = match.group(1)
+    output_slot = int(match.group(2))
+    self._ProcessHealthPill(
+        event.wall_time, event.step, node_name, output_slot, elements)
+
+  def _UpdateTensorSummaries(self):
+    g = self.Graph()
+    for node in g.node:
+      if node.op == 'TensorSummary':
+        d = summary.get_summary_description(node)
+
+        self._tensor_summaries[node.name] = d
 
   def Tags(self):
     """Return all tags found in the value stream.
@@ -323,6 +456,20 @@ class EventAccumulator(object):
     """
     return self._scalars.Items(tag)
 
+  def HealthPills(self, node_name):
+    """Returns all health pill values for a certain node.
+
+    Args:
+      node_name: The name of the node to obtain health pills for.
+
+    Raises:
+      KeyError: If the node name is not found.
+
+    Returns:
+      An array of `HealthPillEvent`s.
+    """
+    return self._health_pills.Items(node_name)
+
   def Graph(self):
     """Return the graph definition, if there is one.
 
@@ -339,11 +486,6 @@ class EventAccumulator(object):
     if self._graph is not None:
       graph.ParseFromString(self._graph)
       return graph
-    if self._meta_graph is not None:
-      meta_graph = meta_graph_pb2.MetaGraphDef()
-      meta_graph.ParseFromString(self._meta_graph)
-      if meta_graph.graph_def:
-        return meta_graph.graph_def
     raise ValueError('There is no graph in this EventAccumulator')
 
   def MetaGraph(self):
@@ -509,11 +651,10 @@ class EventAccumulator(object):
   def _ProcessHistogram(self, tag, wall_time, step, histo):
     """Processes a proto histogram by adding it to accumulated state."""
     histo = self._ConvertHistogramProtoToTuple(histo)
-    self._histograms.AddItem(tag, HistogramEvent(wall_time, step, histo))
+    histo_ev = HistogramEvent(wall_time, step, histo)
+    self._histograms.AddItem(tag, histo_ev)
     self._compressed_histograms.AddItem(
-        tag,
-        CompressedHistogramEvent(
-            wall_time, step, _CompressHistogram(histo, self._compression_bps)))
+        tag, histo_ev, lambda x: _CompressHistogram(x, self._compression_bps))
 
   def _ProcessImage(self, tag, wall_time, step, image):
     """Processes an image by adding it to accumulated state."""
@@ -538,6 +679,31 @@ class EventAccumulator(object):
     """Processes a simple value by adding it to accumulated state."""
     sv = ScalarEvent(wall_time=wall_time, step=step, value=scalar)
     self._scalars.AddItem(tag, sv)
+
+  def _ProcessHealthPill(self, wall_time, step, node_name, output_slot,
+                         elements):
+    """Processes a health pill value by adding it to accumulated state.
+
+    Args:
+      wall_time: The time at which the health pill was created. Provided by the
+        debugger.
+      step: The step at which the health pill was created. Provided by the
+        debugger.
+      node_name: The name of the node for this health pill.
+      output_slot: The output slot for this health pill.
+      elements: An ND array of 12 floats. The elements of the health pill.
+    """
+    # Key by the node name for fast retrieval of health pills by node name. The
+    # array is cast to a list so that it is JSON-able. The debugger data plugin
+    # serves a JSON response.
+    self._health_pills.AddItem(
+        node_name,
+        HealthPillEvent(
+            wall_time=wall_time,
+            step=step,
+            node_name=node_name,
+            output_slot=output_slot,
+            value=list(elements)))
 
   def _Purge(self, event, by_tags):
     """Purge all events that have occurred after the given event.step.
@@ -603,11 +769,13 @@ def _GetPurgeMessage(most_recent_step, most_recent_wall_time, event_step,
 
 def _GeneratorFromPath(path):
   """Create an event generator for file or directory at given path string."""
+  if not path:
+    raise ValueError('path must be a valid string')
   if IsTensorFlowEventsFile(path):
-    return io_wrapper.CreateFileLoader(path)
+    return event_file_loader.EventFileLoader(path)
   else:
-    return directory_watcher.DirectoryWatcher(path, io_wrapper.CreateFileLoader,
-                                              IsTensorFlowEventsFile)
+    return directory_watcher.DirectoryWatcher(
+        path, event_file_loader.EventFileLoader, IsTensorFlowEventsFile)
 
 
 def _ParseFileVersion(file_version):
@@ -630,7 +798,7 @@ def _ParseFileVersion(file_version):
     return -1
 
 
-def _CompressHistogram(histo, bps):
+def _CompressHistogram(histo_ev, bps):
   """Creates fixed size histogram by adding compression to accumulated state.
 
   This routine transforms a histogram at a particular step by linearly
@@ -641,15 +809,19 @@ def _CompressHistogram(histo, bps):
   coordinate.
 
   Args:
-    histo: A HistogramValue namedtuple.
+    histo_ev: A HistogramEvent namedtuple.
     bps: Compression points represented in basis points, 1/100ths of a percent.
 
   Returns:
-    List of CompressedHistogramValue namedtuples.
+    CompressedHistogramEvent namedtuple.
   """
   # See also: Histogram::Percentile() in core/lib/histogram/histogram.cc
+  histo = histo_ev.histogram_value
   if not histo.num:
-    return [CompressedHistogramValue(b, 0.0) for b in bps]
+    return CompressedHistogramEvent(
+        histo_ev.wall_time,
+        histo_ev.step,
+        [CompressedHistogramValue(b, 0.0) for b in bps])
   bucket = np.array(histo.bucket)
   weights = (bucket * bps[-1] / (bucket.sum() or 1.0)).cumsum()
   values = []
@@ -676,7 +848,7 @@ def _CompressHistogram(histo, bps):
   while j < len(bps):
     values.append(CompressedHistogramValue(bps[j], histo.max))
     j += 1
-  return values
+  return CompressedHistogramEvent(histo_ev.wall_time, histo_ev.step, values)
 
 
 def _Remap(x, x0, x1, y0, y1):

@@ -52,7 +52,7 @@ def _get_saver():
       saver = saver[0]
     else:
       saver = None
-  if saver is None and variables.all_variables():
+  if saver is None and variables.global_variables():
     saver = tf_saver.Saver()
     ops.add_to_collection(ops.GraphKeys.SAVERS, saver)
   return saver
@@ -64,14 +64,14 @@ def _export_graph(graph, saver, checkpoint_path, export_dir,
   """Exports graph via session_bundle, by creating a Session."""
   with graph.as_default():
     with tf_session.Session('') as session:
-      variables.initialize_local_variables()
-      data_flow_ops.initialize_all_tables()
+      variables.local_variables_initializer()
+      data_flow_ops.tables_initializer()
       saver.restore(session, checkpoint_path)
 
       export = exporter.Exporter(saver)
       export.init(init_op=control_flow_ops.group(
-          variables.initialize_local_variables(),
-          data_flow_ops.initialize_all_tables()),
+          variables.local_variables_initializer(),
+          data_flow_ops.tables_initializer()),
                   default_graph_signature=default_graph_signature,
                   named_graph_signatures=named_graph_signatures,
                   assets_collection=ops.get_collection(
@@ -276,13 +276,16 @@ def _export_estimator(estimator,
                       exports_to_keep,
                       input_feature_key=None,
                       use_deprecated_input_fn=True,
-                      prediction_key=None):
+                      prediction_key=None,
+                      checkpoint_path=None):
   if use_deprecated_input_fn:
     input_fn = input_fn or _default_input_fn
   elif input_fn is None:
     raise ValueError('input_fn must be defined.')
 
-  checkpoint_path = tf_saver.latest_checkpoint(estimator._model_dir)
+  # If checkpoint_path is specified, use the specified checkpoint path.
+  checkpoint_path = (checkpoint_path or
+                     tf_saver.latest_checkpoint(estimator._model_dir))
   with ops.Graph().as_default() as g:
     contrib_variables.create_global_step(g)
 
@@ -297,10 +300,11 @@ def _export_estimator(estimator,
       if input_feature_key is not None:
         examples = features.pop(input_feature_key)
 
-    if not features and not examples:
+    if (not features) and (examples is None):
       raise ValueError('Either features or examples must be defined.')
 
-    predictions = estimator._get_predict_ops(features)
+    predictions = estimator._get_predict_ops(features).predictions
+
     if prediction_key is not None:
       predictions = predictions[prediction_key]
 

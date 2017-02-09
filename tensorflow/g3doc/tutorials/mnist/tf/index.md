@@ -98,7 +98,7 @@ The `inference()` function builds the graph as far as needed to
 return the tensor that would contain the output predictions.
 
 It takes the images placeholder as input and builds on top
-of it a pair of fully connected layers with [ReLu](https://en.wikipedia.org/wiki/Rectifier_(neural_networks)) activation followed by a ten
+of it a pair of fully connected layers with [ReLU](https://en.wikipedia.org/wiki/Rectifier_(neural_networks)) activation followed by a ten
 node linear layer specifying the output logits.
 
 Each layer is created beneath a unique [`tf.name_scope`](../../../api_docs/python/framework.md#name_scope)
@@ -171,7 +171,7 @@ First, the values from the `labels_placeholder` are converted to 64-bit integers
 ```python
 labels = tf.to_int64(labels)
 cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-    logits, labels, name='xentropy')
+    labels=labels, logits=logits, name='xentropy')
 ```
 
 It then uses [`tf.reduce_mean`](../../../api_docs/python/math_ops.md#reduce_mean)
@@ -195,13 +195,13 @@ The `training()` function adds the operations needed to minimize the loss via
 [Gradient Descent](https://en.wikipedia.org/wiki/Gradient_descent).
 
 Firstly, it takes the loss tensor from the `loss()` function and hands it to a
-[`tf.scalar_summary`](../../../api_docs/python/train.md#scalar_summary),
+[`tf.summary.scalar`](../../../api_docs/python/summary#scalar),
 an op for generating summary values into the events file when used with a
 `SummaryWriter` (see below).  In this case, it will emit the snapshot value of
 the loss every time the summaries are written out.
 
 ```python
-tf.scalar_summary(loss.op.name, loss)
+tf.summary.scalar('loss', loss)
 ```
 
 Next, we instantiate a [`tf.train.GradientDescentOptimizer`](../../../api_docs/python/train.md#GradientDescentOptimizer)
@@ -269,7 +269,7 @@ instances are initialized by calling [`sess.run()`](../../../api_docs/python/cli
 on their initialization op.
 
 ```python
-init = tf.initialize_all_variables()
+init = tf.global_variables_initializer()
 sess.run(init)
 ```
 
@@ -363,7 +363,7 @@ during the graph building phase.
 summary = tf.merge_all_summaries()
 ```
 
-And then after the session is created, a [`tf.train.SummaryWriter`](../../../api_docs/python/train.md#SummaryWriter)
+And then after the session is created, a [`tf.train.SummaryWriter`](../../../api_docs/python/train/adding_summaries_to_event_files#SummaryWriter)
 may be instantiated to write the events files, which
 contain both the graph itself and the values of the summaries.
 
@@ -385,7 +385,7 @@ folder to display the values from the summaries.
 
 ![MNIST TensorBoard](../../../images/mnist_tensorboard.png "MNIST TensorBoard")
 
-**NOTE**: For more info about how to build and run Tensorboard, please see the accompanying tutorial [Tensorboard: Visualizing Your Training](../../../how_tos/summaries_and_tensorboard/index.md).
+**NOTE**: For more info about how to build and run Tensorboard, please see the accompanying tutorial [Tensorboard: Visualizing Learning](../../../how_tos/summaries_and_tensorboard/index.md).
 
 #### Save a Checkpoint
 

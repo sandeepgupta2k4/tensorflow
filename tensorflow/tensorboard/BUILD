@@ -28,8 +28,11 @@ py_binary(
     data = [":frontend"],
     srcs_version = "PY2AND3",
     deps = [
+        ":debugger",
+        ":projector",
         "//tensorflow/python:platform",
-        "//tensorflow/tensorboard/backend:server",
+        "//tensorflow/tensorboard/backend:application",
+        "@org_pocoo_werkzeug//:werkzeug",
     ],
 )
 
@@ -59,7 +62,19 @@ py_library(
     srcs_version = "PY2AND3",
 )
 
-## Embedding projector ##
+## TensorFlow Debugger Plugin ##
+py_library(
+    name = "debugger",
+    srcs = ["plugins/debugger/plugin.py"],
+    srcs_version = "PY2AND3",
+    deps = [
+        ":base_plugin",
+        "//tensorflow/python:platform",
+        "//tensorflow/tensorboard/lib/python:http_util",
+    ],
+)
+
+## Embedding Projector Plugin ##
 py_library(
     name = "projector",
     srcs = glob(["plugins/projector/**/*.py"]),
@@ -68,17 +83,9 @@ py_library(
         ":base_plugin",
         "//tensorflow/contrib/tensorboard:projector",
         "//tensorflow/contrib/tensorboard:protos_all_py",
+        "//tensorflow/python:errors",
         "//tensorflow/python:lib",
+        "//tensorflow/python:platform",
         "//tensorflow/python:training",
-    ],
-)
-
-py_library(
-    name = "plugins",
-    srcs = ["plugins/__init__.py"],
-    srcs_version = "PY2AND3",
-    deps = [
-        # All registered plugins go in here.
-        ":projector",
     ],
 )

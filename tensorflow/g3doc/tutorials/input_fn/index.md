@@ -15,9 +15,9 @@ tutorial](../tflearn/index.md):
 
 ```py
 training_set = tf.contrib.learn.datasets.base.load_csv_with_header(
-    filename=IRIS_TRAINING, target_dtype=np.int)
+    filename=IRIS_TRAINING, target_dtype=np.int, features_dtype=np.float32)
 test_set = tf.contrib.learn.datasets.base.load_csv_with_header(
-    filename=IRIS_TEST, target_dtype=np.int)
+    filename=IRIS_TEST, target_dtype=np.int, features_dtype=np.float32)
 ...
 
 classifier.fit(x=training_set.data,
@@ -35,7 +35,7 @@ encapsulate the logic for preprocessing and piping data into your models.
 The following code illustrates the basic skeleton for an input function:
 
 ```python
-def my_input_fn()
+def my_input_fn():
 
     # Preprocess your data here...
 
@@ -78,8 +78,8 @@ For [sparse, categorical data](https://en.wikipedia.org/wiki/Sparse_matrix)
 `SparseTensor`, which is instantiated with three arguments:
 
 <dl>
-  <dt><code>shape</code></dt>
-  <dd>The shape of the tensor. Takes a list indicating the number of elements in each dimension. For example, <code>shape=[3,6]</code> specifies a two-dimensional 3x6 tensor, <code>shape=[2,3,4]</code> specifies a three-dimensional 2x3x4 tensor, and <code>shape=[9]</code> specifies a one-dimensional tensor with 9 elements.</dd>
+  <dt><code>dense_shape</code></dt>
+  <dd>The shape of the tensor. Takes a list indicating the number of elements in each dimension. For example, <code>dense_shape=[3,6]</code> specifies a two-dimensional 3x6 tensor, <code>dense_shape=[2,3,4]</code> specifies a three-dimensional 2x3x4 tensor, and <code>dense_shape=[9]</code> specifies a one-dimensional tensor with 9 elements.</dd>
   <dt><code>indices</code></dt>
   <dd>The indices of the elements in your tensor that contain nonzero values. Takes a list of terms, where each term is itself a list containing the index of a nonzero element. (Elements are zero-indexed—i.e., [0,0] is the index value for the element in the first column of the first row in a two-dimensional tensor.) For example, <code>indices=[[1,3], [2,4]]</code> specifies that the elements with indexes of [1,3] and [2,4] have nonzero values.</dd>
   <dt><code>values</code></dt>
@@ -93,7 +93,7 @@ index [2,4] has a value of 0.5 (all other values are 0):
 ```python
 sparse_tensor = tf.SparseTensor(indices=[[0,1], [2,4]],
                                 values=[6, 0.5],
-                                shape=[3, 5])
+                                dense_shape=[3, 5])
 ```
 
 This corresponds to the following dense tensor:
@@ -139,8 +139,8 @@ arguments as your `input_fn` and use it to invoke your input function
 with the desired parameters. For example:
 
 ```python
-def my_input_function_training_set:
-  my_input_function(training_set)
+def my_input_function_training_set():
+  return my_input_function(training_set)
 
 classifier.fit(input_fn=my_input_fn_training_set, steps=2000)
 ```
@@ -222,6 +222,9 @@ logging verbosity](../monitors/index.md#enabling-logging-with-tensorflow) to
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+
+import itertools
+
 import pandas as pd
 import tensorflow as tf
 
@@ -274,8 +277,9 @@ with 10 nodes each), and `feature_columns`, containing the list of
 `FeatureColumns` you just defined:
 
 ```python
-regressor = tf.contrib.learn.DNNRegressor(
-    feature_columns=feature_cols, hidden_units=[10, 10])
+regressor = tf.contrib.learn.DNNRegressor(feature_columns=feature_cols,
+                                          hidden_units=[10, 10],
+                                          model_dir="/tmp/boston_model")
 ```
 
 ### Building the input_fn
@@ -286,7 +290,7 @@ accept a _pandas_ `Dataframe` and return feature column and label values as
 
 ```python
 def input_fn(data_set):
-  feature_cols = {k: tf.constant(data_set[k].values
+  feature_cols = {k: tf.constant(data_set[k].values)
                   for k in FEATURES}
   labels = tf.constant(data_set[LABEL].values)
   return feature_cols, labels
@@ -300,8 +304,6 @@ which means the function can process any of the `DataFrame`s you've imported:
 
 To train the neural network regressor, run `fit` with the `training_set` passed
 to the `input_fn` as follows:
-
-<!-- TODO(skleinfeld): Decide on the best step value to use here for pedagogical purposes -->
 
 ```python
 regressor.fit(input_fn=lambda: input_fn(training_set), steps=5000)
@@ -355,7 +357,9 @@ Finally, you can use the model to predict median house values for the
 
 ```python
 y = regressor.predict(input_fn=lambda: input_fn(prediction_set))
-print ("Predictions: {}".format(str(y)))
+# .predict() returns an iterator; convert to a list and print predictions
+predictions = list(itertools.islice(y, 6))
+print ("Predictions: {}".format(str(predictions)))
 ```
 
 Your results should contain six house-value predictions in thousands of dollars,

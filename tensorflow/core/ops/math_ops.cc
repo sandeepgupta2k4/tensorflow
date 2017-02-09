@@ -175,13 +175,6 @@ Given a tensor `x` of complex numbers, this operation returns a tensor of type
 `float` or `double` that is the absolute value of each element in `x`. All
 elements in `x` must be complex numbers of the form \\(a + bj\\). The absolute
 value is computed as \\( \sqrt{a^2 + b^2}\\).
-
-For example:
-
-```
-# tensor 'x' is [[-2.25 + 4.75j], [-3.25 + 5.75j]]
-tf.complex_abs(x) ==> [5.25594902, 6.60492229]
-```
 )doc");
 
 // Declares cwise unary operations signature: 't -> 't
@@ -210,24 +203,28 @@ tf.complex_abs(x) ==> [5.25594902, 6.60492229]
       .Attr("T: {half, float, double, complex64, complex128}") \
       .SetShapeFn(shape_inference::UnchangedShape)
 
-REGISTER_OP("Neg")
-    .UNARY()
-    .Doc(R"doc(
+REGISTER_OP("Neg").UNARY().Doc(R"doc(
 Computes numerical negative value element-wise.
 I.e., \\(y = -x\\).
 )doc");
 
-REGISTER_OP("Inv").UNARY().Doc(R"doc(
+REGISTER_OP("Inv")
+    .UNARY()
+    .Doc(R"doc(
 Computes the reciprocal of x element-wise.
 I.e., \\(y = 1 / x\\).
-)doc");
+)doc")
+    .Deprecated(17, "Use Reciprocal");
 
-REGISTER_OP("InvGrad").UNARY_GRADIENT_COMPLEX().Doc(R"doc(
+REGISTER_OP("InvGrad")
+    .UNARY_GRADIENT_COMPLEX()
+    .Doc(R"doc(
 Computes the gradient for the inverse of `x` wrt its input.
 
 Specifically, `grad = -dy * y*y`, where `y = 1/x`, and `dy`
 is the corresponding input gradient.
-)doc");
+)doc")
+    .Deprecated(17, "Use ReciprocalGrad");
 
 REGISTER_OP("Reciprocal").UNARY().Doc(R"doc(
 Computes the reciprocal of x element-wise.
@@ -241,16 +238,12 @@ Specifically, `grad = -dy * y*y`, where `y = 1/x`, and `dy`
 is the corresponding input gradient.
 )doc");
 
-REGISTER_OP("Square")
-    .UNARY()
-    .Doc(R"doc(
+REGISTER_OP("Square").UNARY().Doc(R"doc(
 Computes square of x element-wise.
 I.e., \\(y = x * x = x^2\\).
 )doc");
 
-REGISTER_OP("Sqrt")
-    .UNARY_COMPLEX()
-    .Doc(R"doc(
+REGISTER_OP("Sqrt").UNARY_COMPLEX().Doc(R"doc(
 Computes square root of x element-wise.
 I.e., \\(y = \sqrt{x} = x^{1/2}\\).
 )doc");
@@ -262,9 +255,7 @@ Specifically, `grad = dy * 0.5 / y`, where `y = sqrt(x)`, and `dy`
 is the corresponding input gradient.
 )doc");
 
-REGISTER_OP("Rsqrt")
-    .UNARY_COMPLEX()
-    .Doc(R"doc(
+REGISTER_OP("Rsqrt").UNARY_COMPLEX().Doc(R"doc(
 Computes reciprocal of square root of x element-wise.
 I.e., \\(y = 1 / \sqrt{x}\\).
 )doc");
@@ -283,22 +274,26 @@ Specifically, `grad = dy * -0.5 * y^3`, where `y = rsqrt(x)`, and `dy`
 is the corresponding input gradient.
 )doc");
 
-REGISTER_OP("Exp")
-    .UNARY_COMPLEX()
-    .Doc(R"doc(
+REGISTER_OP("Exp").UNARY_COMPLEX().Doc(R"doc(
 Computes exponential of x element-wise.  \\(y = e^x\\).
 )doc");
 
-REGISTER_OP("Log")
-    .UNARY_COMPLEX()
-    .Doc(R"doc(
+REGISTER_OP("Expm1").UNARY_COMPLEX().Doc(R"doc(
+Computes exponential of x - 1 element-wise.
+I.e., \\(y = (\exp x) - 1\\).
+)doc");
+
+REGISTER_OP("Log").UNARY_COMPLEX().Doc(R"doc(
 Computes natural logarithm of x element-wise.
 I.e., \\(y = \log_e x\\).
 )doc");
 
-REGISTER_OP("Tanh")
-    .UNARY_COMPLEX()
-    .Doc(R"doc(
+REGISTER_OP("Log1p").UNARY_COMPLEX().Doc(R"doc(
+Computes natural logarithm of (1 + x) element-wise.
+I.e., \\(y = \log_e (1 + x)\\).
+)doc");
+
+REGISTER_OP("Tanh").UNARY_COMPLEX().Doc(R"doc(
 Computes hyperbolic tangent of `x` element-wise.
 )doc");
 
@@ -309,34 +304,24 @@ Specifically, `grad = dy * (1 - y*y)`, where `y = tanh(x)`, and `dy`
 is the corresponding input gradient.
 )doc");
 
-REGISTER_OP("Lgamma")
-    .UNARY_REAL()
-    .Doc(R"doc(
+REGISTER_OP("Lgamma").UNARY_REAL().Doc(R"doc(
 Computes the log of the absolute value of `Gamma(x)` element-wise.
 )doc");
 
-REGISTER_OP("Digamma")
-    .UNARY_REAL()
-    .Doc(R"doc(
+REGISTER_OP("Digamma").UNARY_REAL().Doc(R"doc(
 Computes Psi, the derivative of Lgamma (the log of the absolute value of
 `Gamma(x)`), element-wise.
 )doc");
 
-REGISTER_OP("Erf")
-    .UNARY_REAL()
-    .Doc(R"doc(
+REGISTER_OP("Erf").UNARY_REAL().Doc(R"doc(
 Computes the Gauss error function of `x` element-wise.
 )doc");
 
-REGISTER_OP("Erfc")
-    .UNARY_REAL()
-    .Doc(R"doc(
+REGISTER_OP("Erfc").UNARY_REAL().Doc(R"doc(
 Computes the complementary error function of `x` element-wise.
 )doc");
 
-REGISTER_OP("Sigmoid")
-    .UNARY_COMPLEX()
-    .Doc(R"doc(
+REGISTER_OP("Sigmoid").UNARY_COMPLEX().Doc(R"doc(
 Computes sigmoid of `x` element-wise.
 
 Specifically, `y = 1 / (1 + exp(-x))`.
@@ -349,39 +334,27 @@ Specifically, `grad = dy * y * (1 - y)`, where `y = sigmoid(x)`, and
 `dy` is the corresponding input gradient.
 )doc");
 
-REGISTER_OP("Sin")
-    .UNARY_COMPLEX()
-    .Doc(R"doc(
+REGISTER_OP("Sin").UNARY_COMPLEX().Doc(R"doc(
 Computes sin of x element-wise.
 )doc");
 
-REGISTER_OP("Cos")
-    .UNARY_COMPLEX()
-    .Doc(R"doc(
+REGISTER_OP("Cos").UNARY_COMPLEX().Doc(R"doc(
 Computes cos of x element-wise.
 )doc");
 
-REGISTER_OP("Tan")
-    .UNARY()
-    .Doc(R"doc(
+REGISTER_OP("Tan").UNARY().Doc(R"doc(
 Computes tan of x element-wise.
 )doc");
 
-REGISTER_OP("Asin")
-    .UNARY()
-    .Doc(R"doc(
+REGISTER_OP("Asin").UNARY().Doc(R"doc(
 Computes asin of x element-wise.
 )doc");
 
-REGISTER_OP("Acos")
-    .UNARY()
-    .Doc(R"doc(
+REGISTER_OP("Acos").UNARY().Doc(R"doc(
 Computes acos of x element-wise.
 )doc");
 
-REGISTER_OP("Atan")
-    .UNARY()
-    .Doc(R"doc(
+REGISTER_OP("Atan").UNARY().Doc(R"doc(
 Computes atan of x element-wise.
 )doc");
 
@@ -396,6 +369,10 @@ REGISTER_OP("IsNan")
     .SetShapeFn(shape_inference::UnchangedShape)
     .Doc(R"doc(
 Returns which elements of x are NaN.
+
+@compatibility(numpy)
+Equivalent to np.isnan
+@end_compatibility
 )doc");
 
 REGISTER_OP("IsInf")
@@ -405,6 +382,10 @@ REGISTER_OP("IsInf")
     .SetShapeFn(shape_inference::UnchangedShape)
     .Doc(R"doc(
 Returns which elements of x are Inf.
+
+@compatibility(numpy)
+Equivalent to np.isinf
+@end_compatibility
 )doc");
 
 REGISTER_OP("IsFinite")
@@ -414,6 +395,10 @@ REGISTER_OP("IsFinite")
     .SetShapeFn(shape_inference::UnchangedShape)
     .Doc(R"doc(
 Returns which elements of x are finite.
+
+@compatibility(numpy)
+Equivalent to np.isfinite
+@end_compatibility
 )doc");
 
 REGISTER_OP("Sign")
@@ -447,11 +432,31 @@ REGISTER_OP("Ceil")
 Returns element-wise smallest integer in not less than x.
 )doc");
 
+REGISTER_OP("Rint")
+    .Input("x: T")
+    .Output("y: T")
+    .Attr("T: {float, double}")
+    .SetShapeFn(shape_inference::UnchangedShape)
+    .Doc(R"doc(
+Returns element-wise integer closest to x.
+
+If the result is midway between two representable values,
+the even representable is chosen.
+For example:
+
+```
+rint(-1.5) ==> -2.0
+rint(0.5000001) ==> 1.0
+rint([-1.7, -1.5, -0.2, 0.2, 1.5, 1.7, 2.0]) ==> [-2., -2., -0., 0., 2., 2., 2.]
+```
+)doc");
+
 // Declares cwise binary operations signature: 't, 't -> 't.
 
-#define BINARY_MORE()                              \
-  Input("x: T").Input("y: T").Output("z: T").Attr( \
-      "T: {half, float, double, uint8, int8, uint16, int16, int32, int64, complex64, complex128}")
+#define BINARY_MORE()                                                       \
+  Input("x: T").Input("y: T").Output("z: T").Attr(                          \
+      "T: {half, float, double, uint8, int8, uint16, int16, int32, int64, " \
+      "complex64, complex128}")
 
 #define BINARY_FEWER()                             \
   Input("x: T").Input("y: T").Output("z: T").Attr( \
@@ -499,6 +504,43 @@ REGISTER_OP("Div")
     .SetShapeFn(shape_inference::BroadcastBinaryOpShapeFn)
     .Doc(R"doc(
 Returns x / y element-wise.
+
+*NOTE*: `Div` supports broadcasting. More about broadcasting
+[here](http://docs.scipy.org/doc/numpy/user/basics.broadcasting.html)
+)doc");
+
+REGISTER_OP("FloorDiv")
+    .BINARY_MORE()
+    .SetShapeFn(shape_inference::BroadcastBinaryOpShapeFn)
+    .Doc(R"doc(
+Returns x // y element-wise.
+
+*NOTE*: `FloorDiv` supports broadcasting. More about broadcasting
+[here](http://docs.scipy.org/doc/numpy/user/basics.broadcasting.html)
+)doc");
+
+REGISTER_OP("TruncateDiv")
+    .BINARY_MORE()
+    .SetShapeFn(shape_inference::BroadcastBinaryOpShapeFn)
+    .Doc(R"doc(
+Returns x / y element-wise for integer types.
+
+Truncation designates that negative numbers will round fractional quantities
+toward zero. I.e. -7 / 5 = 1. This matches C semantics but it is different
+than Python semantics. See `FloorDiv` for a division function that matches
+Python Semantics.
+
+*NOTE*: `TruncateDiv` supports broadcasting. More about broadcasting
+[here](http://docs.scipy.org/doc/numpy/user/basics.broadcasting.html)
+)doc");
+
+REGISTER_OP("RealDiv")
+    .BINARY_MORE()
+    .SetShapeFn(shape_inference::BroadcastBinaryOpShapeFn)
+    .Doc(R"doc(
+Returns x / y element-wise for real types.
+
+If `x` and `y` are reals, this will return the floating-point division.
 
 *NOTE*: `Div` supports broadcasting. More about broadcasting
 [here](http://docs.scipy.org/doc/numpy/user/basics.broadcasting.html)
@@ -554,6 +596,37 @@ REGISTER_OP("Mod")
     .SetShapeFn(shape_inference::BroadcastBinaryOpShapeFn)
     .Doc(R"doc(
 Returns element-wise remainder of division.
+
+*NOTE*: `Mod` supports broadcasting. More about broadcasting
+[here](http://docs.scipy.org/doc/numpy/user/basics.broadcasting.html)
+)doc");
+
+REGISTER_OP("FloorMod")
+    .Input("x: T")
+    .Input("y: T")
+    .Output("z: T")
+    .Attr("T: {int32, int64, float, double}")
+    .SetShapeFn(shape_inference::BroadcastBinaryOpShapeFn)
+    .Doc(R"doc(
+Returns element-wise remainder of division. When `x < 0` xor `y < 0` is
+true, this follows Python semantics in that the result here is consistent
+with a flooring divide. E.g. `floor(x / y) * y + mod(x, y) = x`.
+
+*NOTE*: `FloorMod` supports broadcasting. More about broadcasting
+[here](http://docs.scipy.org/doc/numpy/user/basics.broadcasting.html)
+)doc");
+
+REGISTER_OP("TruncateMod")
+    .Input("x: T")
+    .Input("y: T")
+    .Output("z: T")
+    .Attr("T: {int32, int64, float, double}")
+    .SetShapeFn(shape_inference::BroadcastBinaryOpShapeFn)
+    .Doc(R"doc(
+Returns element-wise remainder of division. This emulates C semantics where
+
+true, this follows C semantics in that the result here is consistent
+with a flooring divide. E.g. `floor(x / y) * y + mod(x, y) = x`.
 
 *NOTE*: `Mod` supports broadcasting. More about broadcasting
 [here](http://docs.scipy.org/doc/numpy/user/basics.broadcasting.html)
@@ -726,36 +799,28 @@ beta function.
       .Attr("T: realnumbertype") \
       .SetShapeFn(shape_inference::BroadcastBinaryOpShapeFn)
 
-REGISTER_OP("Less")
-    .COMPARISON()
-    .Doc(R"doc(
+REGISTER_OP("Less").COMPARISON().Doc(R"doc(
 Returns the truth value of (x < y) element-wise.
 
 *NOTE*: `Less` supports broadcasting. More about broadcasting
 [here](http://docs.scipy.org/doc/numpy/user/basics.broadcasting.html)
 )doc");
 
-REGISTER_OP("LessEqual")
-    .COMPARISON()
-    .Doc(R"doc(
+REGISTER_OP("LessEqual").COMPARISON().Doc(R"doc(
 Returns the truth value of (x <= y) element-wise.
 
 *NOTE*: `LessEqual` supports broadcasting. More about broadcasting
 [here](http://docs.scipy.org/doc/numpy/user/basics.broadcasting.html)
 )doc");
 
-REGISTER_OP("Greater")
-    .COMPARISON()
-    .Doc(R"doc(
+REGISTER_OP("Greater").COMPARISON().Doc(R"doc(
 Returns the truth value of (x > y) element-wise.
 
 *NOTE*: `Greater` supports broadcasting. More about broadcasting
 [here](http://docs.scipy.org/doc/numpy/user/basics.broadcasting.html)
 )doc");
 
-REGISTER_OP("GreaterEqual")
-    .COMPARISON()
-    .Doc(R"doc(
+REGISTER_OP("GreaterEqual").COMPARISON().Doc(R"doc(
 Returns the truth value of (x >= y) element-wise.
 
 *NOTE*: `GreaterEqual` supports broadcasting. More about broadcasting
@@ -777,18 +842,14 @@ Returns the truth value of (x >= y) element-wise.
           "quint8, qint8, qint32, string, bool, complex128}")           \
       .SetShapeFn(shape_inference::BroadcastBinaryOpShapeFn)
 
-REGISTER_OP("Equal")
-    .EQUALITY_COMPARISON()
-    .Doc(R"doc(
+REGISTER_OP("Equal").EQUALITY_COMPARISON().Doc(R"doc(
 Returns the truth value of (x == y) element-wise.
 
 *NOTE*: `Equal` supports broadcasting. More about broadcasting
 [here](http://docs.scipy.org/doc/numpy/user/basics.broadcasting.html)
 )doc");
 
-REGISTER_OP("NotEqual")
-    .EQUALITY_COMPARISON()
-    .Doc(R"doc(
+REGISTER_OP("NotEqual").EQUALITY_COMPARISON().Doc(R"doc(
 Returns the truth value of (x != y) element-wise.
 
 *NOTE*: `NotEqual` supports broadcasting. More about broadcasting
@@ -814,18 +875,14 @@ Returns the truth value of NOT x element-wise.
       .SetIsCommutative() \
       .SetShapeFn(shape_inference::BroadcastBinaryOpShapeFn)
 
-REGISTER_OP("LogicalAnd")
-    .BINARY_LOGICAL()
-    .Doc(R"doc(
+REGISTER_OP("LogicalAnd").BINARY_LOGICAL().Doc(R"doc(
 Returns the truth value of x AND y element-wise.
 
 *NOTE*: `LogicalAnd` supports broadcasting. More about broadcasting
 [here](http://docs.scipy.org/doc/numpy/user/basics.broadcasting.html)
 )doc");
 
-REGISTER_OP("LogicalOr")
-    .BINARY_LOGICAL()
-    .Doc(R"doc(
+REGISTER_OP("LogicalOr").BINARY_LOGICAL().Doc(R"doc(
 Returns the truth value of x OR y element-wise.
 
 *NOTE*: `LogicalOr` supports broadcasting. More about broadcasting
@@ -843,9 +900,23 @@ REGISTER_OP("Select")
     .Output("output: T")
     .Attr("T: type")
     .SetShapeFn([](InferenceContext* c) {
+      // Merge handle shape and dtype if applicable.
+      if (c->input_handle_dtype(1) != c->input_handle_dtype(2)) {
+        // TODO(apassos) resolve this in the manner of b/32476923
+        return errors::InvalidArgument(
+            "Trying to merge handles pointing to different dtypes.");
+      }
+      c->set_output_handle_dtype(0, c->input_handle_dtype(1));
+      ShapeHandle output_handle_shape;
+      TF_RETURN_IF_ERROR(c->Merge(c->input_handle_shape(1),
+                                  c->input_handle_shape(2),
+                                  &output_handle_shape));
+      c->set_output_handle_shape(0, output_handle_shape);
+
       // The inputs 'then' and 'else' must have the same shape.
       ShapeHandle data = c->input(1);
-      TF_RETURN_IF_ERROR(c->Merge(data, c->input(2), &data));
+      ShapeHandle other = c->input(2);
+      TF_RETURN_IF_ERROR(c->Merge(data, other, &data));
 
       // The input 'cond' must either have the same shape as 'then' and
       // 'else', or be a vector if 'then' and 'else' are at least vectors.
@@ -861,30 +932,50 @@ REGISTER_OP("Select")
       const int32 cond_rank = c->Rank(cond);
       const int32 data_rank = c->Rank(data);
 
-      if (cond_rank != 1) {
-        // If the rank of 'cond' is != 1, the shape must match 'then' and 'else'
-        TF_RETURN_IF_ERROR(c->Merge(data, cond, &data));
+      if (cond_rank == 0) {
+        // The rank of 'cond' is a scalar.
+        // t and e can have any shape.
+        c->set_output(0, data);
+        return Status::OK();
       }
-      if (data_rank != 0) {
-        // If then and else are not scalars, then cond must be at least
-        // a vector, and its first value must match that of 'else'
-        TF_RETURN_IF_ERROR(c->WithRankAtLeast(cond, 1, &cond));
-        if (cond_rank == 1) {
-          TF_RETURN_IF_ERROR(c->Merge(cond, c->Vector(c->Dim(data, 0)), &cond));
-        }
+
+      if (cond_rank != 1) {
+        // If 'cond' is not a vector, and not a scalar,
+        // then shape must match 'then' and 'else'
+        TF_RETURN_IF_ERROR(c->Merge(data, cond, &data));
+        c->set_output(0, data);
+        return Status::OK();
+      }
+
+      if (data_rank == 0) {
+        // if 'then' and 'else' are scalar also the cond must be
+        TF_RETURN_IF_ERROR(c->Merge(data, cond, &data));
+        c->set_output(0, data);
+        return Status::OK();
+      }
+
+      if (cond_rank == 1) {
+        // if the cond is a vector and the 'then' is not a scalar,
+        // the first dimension of 'then' and 'else'
+        TF_RETURN_IF_ERROR(c->Merge(cond, c->Vector(c->Dim(data, 0)), &cond));
+        c->set_output(0, data);
+        return Status::OK();
       }
 
       c->set_output(0, data);
+
       return Status::OK();
     })
     .Doc(R"doc(
 Selects elements from `t` or `e`, depending on `condition`.
 
-The `t`, and `e` tensors must all have the same shape,
-and the output will also have that shape.  The `condition` tensor
-must be a scalar if `t` and `e` are scalars.  If `t` and `e` are vectors
-or higher rank, then `condition` must be either a vector with size
-matching the first dimension of `t`, or must have the same shape as `t`.
+The `t`, and `e` tensors must all have the same shape, and the
+output will also have that shape.
+
+The `condition` tensor must be a scalar if `t` and `e` are scalars.
+If `t` and `e` are vectors or higher rank, then `condition` must be either a
+scalar, a vector with size matching the first dimension of `t`, or must have
+the same shape as `t`.
 
 The `condition` tensor acts as a mask that chooses, based on the value at each
 element, whether the corresponding element / row in the output should be
@@ -1122,17 +1213,18 @@ Status ArgOpShape(shape_inference::InferenceContext* c) {
     dimension_val = dim_t->scalar<int64>()();
   }
 
-  if (dimension_val < 0 || dimension_val >= input_rank) {
-    return errors::InvalidArgument("Dimension (", dimension_val,
-                                   ") must be in the range [0, ", input_rank,
-                                   "), where ", input_rank, " is the ",
-                                   "number of dimensions in the input.");
+  int64 axis = dimension_val < 0 ? dimension_val + input_rank : dimension_val;
+  if (axis < 0 || axis >= input_rank) {
+    return errors::InvalidArgument(
+        "Dimension (", dimension_val, ") must be in the range [", -input_rank,
+        ", ", input_rank, "), where ", input_rank,
+        " is the number of dimensions in the input.");
   }
 
   // Return the input shape without the dimension being reduced.
   std::vector<DimensionHandle> dims;
   for (int i = 0; i < input_rank; ++i) {
-    if (dimension_val != i) {
+    if (axis != i) {
       dims.emplace_back(c->Dim(input_shape, i));
     }
   }
@@ -1250,6 +1342,36 @@ Status SparseSegmentReductionGradShapeFn(InferenceContext* c) {
   return Status::OK();
 }
 
+Status UnsortedSegmentReductionShapeFn(InferenceContext* c) {
+  ShapeHandle s_data = c->input(0);
+  ShapeHandle s_segment_ids = c->input(1);
+  ShapeHandle s_num_segments = c->input(2);
+  TF_RETURN_IF_ERROR(c->WithRank(s_num_segments, 0, &s_num_segments));
+
+  ShapeHandle out;
+
+  // Leading dimensions of data must be compatible with dimensions of
+  // <s_segment_ids>.
+  if (c->RankKnown(s_segment_ids)) {
+    TF_RETURN_IF_ERROR(
+        c->MergePrefix(s_data, s_segment_ids, &s_data, &s_segment_ids));
+
+    // Get the value of the num_segments input tensor.
+    DimensionHandle num_segments_dim;
+    TF_RETURN_IF_ERROR(c->MakeDimForScalarInput(2, &num_segments_dim));
+
+    // Output is {segment_id_rank} + s_data[segment_id_rank:].
+    ShapeHandle s_data_suffix;
+    TF_RETURN_IF_ERROR(
+        c->Subshape(s_data, c->Rank(s_segment_ids), &s_data_suffix));
+    TF_RETURN_IF_ERROR(
+        c->Concatenate(c->Vector(num_segments_dim), s_data_suffix, &out));
+  } else {
+    out = c->UnknownShape();
+  }
+  c->set_output(0, out);
+  return Status::OK();
+}
 }  // namespace
 
 REGISTER_OP("SegmentSum")
@@ -1403,36 +1525,7 @@ REGISTER_OP("UnsortedSegmentSum")
     .Output("output: T")
     .Attr("T: numbertype")
     .Attr("Tindices: {int32,int64}")
-    .SetShapeFn([](InferenceContext* c) {
-      ShapeHandle s_data = c->input(0);
-      ShapeHandle s_segment_ids = c->input(1);
-      ShapeHandle s_num_segments = c->input(2);
-      TF_RETURN_IF_ERROR(c->WithRank(s_num_segments, 0, &s_num_segments));
-
-      ShapeHandle out;
-
-      // Leading dimensions of data must be compatible with dimensions of
-      // <s_segment_ids>.
-      if (c->RankKnown(s_segment_ids)) {
-        TF_RETURN_IF_ERROR(
-            c->MergePrefix(s_data, s_segment_ids, &s_data, &s_segment_ids));
-
-        // Get the value of the num_segments input tensor.
-        DimensionHandle num_segments_dim;
-        TF_RETURN_IF_ERROR(c->MakeDimForScalarInput(2, &num_segments_dim));
-
-        // Output is {segment_id_rank} + s_data[segment_id_rank:].
-        ShapeHandle s_data_suffix;
-        TF_RETURN_IF_ERROR(
-            c->Subshape(s_data, c->Rank(s_segment_ids), &s_data_suffix));
-        TF_RETURN_IF_ERROR(
-            c->Concatenate(c->Vector(num_segments_dim), s_data_suffix, &out));
-      } else {
-        out = c->UnknownShape();
-      }
-      c->set_output(0, out);
-      return Status::OK();
-    })
+    .SetShapeFn(UnsortedSegmentReductionShapeFn)
     .Doc(R"doc(
 Computes the sum along segments of a tensor.
 
@@ -1462,6 +1555,43 @@ output: Has same shape as data, except for the first `segment_ids.rank`
 
 )doc");
 
+
+REGISTER_OP("UnsortedSegmentMax")
+    .Input("data: T")
+    .Input("segment_ids: Tindices")
+    .Input("num_segments: int32")
+    .Output("output: T")
+    .Attr("T: realnumbertype")
+    .Attr("Tindices: {int32,int64}")
+    .SetShapeFn(UnsortedSegmentReductionShapeFn)
+    .Doc(R"doc(
+Computes the Max along segments of a tensor.
+
+Read [the section on
+Segmentation](../../api_docs/python/math_ops.md#segmentation) for an explanation
+of segments.
+
+This operator is similar to the [unsorted segment sum operator](../../api_docs/python/math_ops.md#UnsortedSegmentSum).
+Instead of computing the sum over segments, it computes the maximum
+such that:
+
+\\(output_i = \max_j data_j\\) where max is over `j` such
+that `segment_ids[j] == i`.
+
+If the maximum is empty for a given segment ID `i`, it outputs the smallest possible value for specific numeric type,
+ `output[i] = numeric_limits<T>::min()`.
+
+<div style="width:70%; margin:auto; margin-bottom:10px; margin-top:20px;">
+<img style="width:100%" src="../../images/UnsortedSegmentSum.png" alt>
+</div>
+
+segment_ids: A 1-D tensor whose rank is equal to the rank of `data`'s
+first dimension.
+
+output: Has same shape as data, except for dimension 0 which
+has size `num_segments`.
+
+)doc");
 REGISTER_OP("SparseSegmentSum")
     .Input("data: T")
     .Input("indices: Tidx")
@@ -1659,12 +1789,12 @@ Status RangeSize(const Tensor* start_t, const Tensor* limit_t,
   T limit = limit_t->scalar<T>()();
   T delta = delta_t->scalar<T>()();
   if (start > limit && delta > 0) {
-    return errors::InvalidArgument("Requires start <= limit when delta > 0: ",
-                                   start, "/", limit);
+    return errors::InvalidArgument(
+        "Requires start <= limit when delta > 0: ", start, "/", limit);
   }
   if (start < limit && delta < 0) {
-    return errors::InvalidArgument("Requires start >= limit when delta < 0: ",
-                                   start, "/", limit);
+    return errors::InvalidArgument(
+        "Requires start >= limit when delta < 0: ", start, "/", limit);
   }
   if (delta == 0) {
     return errors::InvalidArgument("Requires delta != 0");
@@ -1921,6 +2051,10 @@ Compute the 2-dimensional discrete Fourier Transform over the inner-most
 input: A complex64 tensor.
 output: A complex64 tensor of the same shape as `input`. The inner-most 2
   dimensions of `input` are replaced with their 2D Fourier Transform.
+
+@compatibility(numpy)
+Equivalent to np.fft2
+@end_compatibility
 )doc");
 
 REGISTER_OP("IFFT2D")
@@ -1936,6 +2070,10 @@ Compute the inverse 2-dimensional discrete Fourier Transform over the inner-most
 input: A complex64 tensor.
 output: A complex64 tensor of the same shape as `input`. The inner-most 2
   dimensions of `input` are replaced with their inverse 2D Fourier Transform.
+
+@compatibility(numpy)
+Equivalent to np.ifft2
+@end_compatibility
 )doc");
 
 REGISTER_OP("FFT3D")
@@ -1951,6 +2089,10 @@ dimensions of `input`.
 input: A complex64 tensor.
 output: A complex64 tensor of the same shape as `input`. The inner-most 3
   dimensions of `input` are replaced with their 3D Fourier Transform.
+
+@compatibility(numpy)
+Equivalent to np.fft3
+@end_compatibility
 )doc");
 
 REGISTER_OP("IFFT3D")
@@ -1966,6 +2108,10 @@ Compute the inverse 3-dimensional discrete Fourier Transform over the inner-most
 input: A complex64 tensor.
 output: A complex64 tensor of the same shape as `input`. The inner-most 3
   dimensions of `input` are replaced with their inverse 3D Fourier Transform.
+
+@compatibility(numpy)
+Equivalent to np.fft3
+@end_compatibility
 )doc");
 
 // --------------------------------------------------------------------------
@@ -2052,7 +2198,7 @@ tf.cumprod([a, b, c]) ==> [a, a * b, a * b * c]
 By setting the `exclusive` kwarg to `True`, an exclusive cumprod is
 performed instead:
 ```prettyprint
-tf.cumprod([a, b, c], exclusive=True) ==> [0, a, a * b]
+tf.cumprod([a, b, c], exclusive=True) ==> [1, a, a * b]
 ```
 
 By setting the `reverse` kwarg to `True`, the cumprod is performed in the
@@ -2064,7 +2210,7 @@ This is more efficient than using separate `tf.reverse` ops.
 
 The `reverse` and `exclusive` kwargs can also be combined:
 ```prettyprint
-tf.cumprod([a, b, c], exclusive=True, reverse=True) ==> [b * c, c, 0]
+tf.cumprod([a, b, c], exclusive=True, reverse=True) ==> [b * c, c, 1]
 ```
 )doc");
 
@@ -2083,6 +2229,7 @@ REGISTER_OP("QuantizedMatMul")
     .Attr("Toutput: quantizedtype = DT_QINT32")
     .Attr("transpose_a: bool = false")
     .Attr("transpose_b: bool = false")
+    .Attr("Tactivation: quantizedtype = DT_QUINT8")
     .SetShapeFn([](InferenceContext* c) {
       TF_RETURN_IF_ERROR(shape_inference::MatMulShape(c));
       ShapeHandle unused;
@@ -2113,7 +2260,38 @@ min_b: The float value that the lowest quantized `b` value represents.
 max_b: The float value that the highest quantized `b` value represents.
 min_out: The float value that the lowest quantized output value represents.
 max_out: The float value that the highest quantized output value represents.
+Tactivation: The type of output produced by activation function
+    following this operation.
 
+)doc");
+
+REGISTER_OP("QuantizedMul")
+    .Input("x: T1")
+    .Input("y: T2")
+    .Input("min_x: float")
+    .Input("max_x: float")
+    .Input("min_y: float")
+    .Input("max_y: float")
+    .Output("z: Toutput")
+    .Output("min_z: float")
+    .Output("max_z: float")
+    .Attr("T1: quantizedtype")
+    .Attr("T2: quantizedtype")
+    .Attr("Toutput: quantizedtype = DT_QINT32")
+    .SetIsCommutative()
+    .SetShapeFn(shape_inference::BroadcastBinaryOpShapeFn)
+    .Doc(R"doc(
+Returns x * y element-wise, working on quantized buffers.
+
+min_x: The float value that the lowest quantized `x` value represents.
+max_x: The float value that the highest quantized `x` value represents.
+min_y: The float value that the lowest quantized `y` value represents.
+max_y: The float value that the highest quantized `y` value represents.
+min_z: The float value that the lowest quantized output value represents.
+max_z: The float value that the highest quantized output value represents.
+
+*NOTE*: `QuantizedMul` supports limited forms of broadcasting. More about
+broadcasting [here](http://docs.scipy.org/doc/numpy/user/basics.broadcasting.html)
 )doc");
 
 REGISTER_OP("QuantizeDownAndShrinkRange")
@@ -2165,6 +2343,77 @@ Tinput: The type of the input.
 output_min: The float value that the minimum quantized output value represents.
 output_max: The float value that the maximum quantized output value represents.
 out_type: The type of the output. Should be a lower bit depth than Tinput.
+
+)doc");
+
+REGISTER_OP("Requantize")
+    .Input("input: Tinput")
+    .Input("input_min: float")
+    .Input("input_max: float")
+    .Input("requested_output_min: float")
+    .Input("requested_output_max: float")
+    .Output("output: out_type")
+    .Output("output_min: float")
+    .Output("output_max: float")
+    .Attr("Tinput: quantizedtype")
+    .Attr("out_type: quantizedtype")
+    .SetShapeFn([](InferenceContext* c) {
+      TF_RETURN_IF_ERROR(shape_inference::UnchangedShape(c));
+      ShapeHandle unused;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(4), 0, &unused));
+      c->set_output(1, c->Scalar());
+      c->set_output(2, c->Scalar());
+      return Status::OK();
+    })
+    .Doc(R"doc(
+Convert the quantized 'input' tensor into a lower-precision 'output', using the
+output range specified with 'requested_output_min' and 'requested_output_max'.
+
+[input_min, input_max] are scalar floats that specify the range for the float
+interpretation of the 'input' data. For example, if input_min is -1.0f and
+input_max is 1.0f, and we are dealing with quint16 quantized data, then a 0
+value in the 16-bit data should be interpreted as -1.0f, and a 65535 means 1.0f.
+
+input_min: The float value that the minimum quantized input value represents.
+input_max: The float value that the maximum quantized input value represents.
+Tinput: The type of the input.
+requested_output_min: The float value that the minimum quantized output value represents.
+requested_output_max: The float value that the maximum quantized output value represents.
+output_min: The requested_output_min value is copied into this output.
+output_max: The requested_output_max value is copied into this output.
+out_type: The type of the output. Should be a lower bit depth than Tinput.
+
+)doc");
+
+REGISTER_OP("RequantizationRange")
+    .Input("input: Tinput")
+    .Input("input_min: float")
+    .Input("input_max: float")
+    .Output("output_min: float")
+    .Output("output_max: float")
+    .Attr("Tinput: quantizedtype")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle unused;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 0, &unused));
+      c->set_output(0, c->Scalar());
+      c->set_output(1, c->Scalar());
+      return Status::OK();
+    })
+    .Doc(R"doc(
+Given a quantized tensor described by (input, input_min, input_max), outputs a
+range that covers the actual values present in that tensor.  This op is
+typically used to produce the requested_output_min and requested_output_max for
+Requantize.
+
+input_min: The float value that the minimum quantized input value represents.
+input_max: The float value that the maximum quantized input value represents.
+Tinput: The type of the input.
+output_min: The computed min output.
+output_max: the computed max output.
 
 )doc");
 

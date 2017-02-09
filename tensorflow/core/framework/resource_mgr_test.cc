@@ -28,7 +28,7 @@ class Resource : public ResourceBase {
   explicit Resource(const string& label) : label_(label) {}
   ~Resource() override {}
 
-  string DebugString() { return strings::StrCat("R/", label_); }
+  string DebugString() override { return strings::StrCat("R/", label_); }
 
  private:
   string label_;
@@ -39,7 +39,7 @@ class Other : public ResourceBase {
   explicit Other(const string& label) : label_(label) {}
   ~Other() override {}
 
-  string DebugString() { return strings::StrCat("O/", label_); }
+  string DebugString() override { return strings::StrCat("O/", label_); }
 
  private:
   string label_;
@@ -291,6 +291,29 @@ TEST(ResourceHandleTest, DifferentType) {
 
   auto* r = new OtherStubResource;
   ASSERT_FALSE(CreateResource(&ctx, p, r).ok());
+  r->Unref();
+}
+
+TEST(ResourceHandleTest, DeleteUsingResourceHandle) {
+  ResourceMgr resource_mgr("");
+  OpKernelContext::Params params;
+  params.resource_manager = &resource_mgr;
+  StubDevice device("device_name");
+  params.device = &device;
+  OpKernelContext ctx(&params, 0);
+
+  ResourceHandle p =
+      MakeResourceHandle<StubResource>(&ctx, "container", "name");
+
+  StubResource* r = new StubResource;
+  TF_EXPECT_OK(CreateResource(&ctx, p, r));
+
+  StubResource* lookup_r = nullptr;
+  TF_EXPECT_OK(LookupResource<StubResource>(&ctx, p, &lookup_r));
+  EXPECT_EQ(lookup_r, r);
+
+  TF_EXPECT_OK(DeleteResource(&ctx, p));
+  EXPECT_NE(LookupResource<StubResource>(&ctx, p, &lookup_r).ok(), true);
   r->Unref();
 }
 
