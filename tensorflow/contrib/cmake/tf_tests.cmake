@@ -116,6 +116,9 @@ if (tensorflow_BUILD_PYTHON_TESTS)
 
   # include all test
   file(GLOB_RECURSE tf_test_src_py
+    "${tensorflow_source_dir}/tensorflow/python/debug/cli/*_test.py"
+    "${tensorflow_source_dir}/tensorflow/python/debug/lib/*_test.py"
+    "${tensorflow_source_dir}/tensorflow/python/debug/wrappers/*_test.py"
     "${tensorflow_source_dir}/tensorflow/python/kernel_tests/*.py"
     "${tensorflow_source_dir}/tensorflow/python/saved_model/*_test.py"
     "${tensorflow_source_dir}/tensorflow/python/training/*_test.py"
@@ -127,6 +130,8 @@ if (tensorflow_BUILD_PYTHON_TESTS)
 
   # exclude the onces we don't want
   set(tf_test_src_py_exclude
+    # Windows does not have the curses library and uses readline.
+    "${tensorflow_source_dir}/tensorflow/python/debug/cli/curses_ui_test.py"
     # generally not working
     "${tensorflow_source_dir}/tensorflow/python/kernel_tests/__init__.py"
     "${tensorflow_source_dir}/tensorflow/python/kernel_tests/benchmark_test.py"
@@ -157,6 +162,7 @@ if (tensorflow_BUILD_PYTHON_TESTS)
       "${tensorflow_source_dir}/tensorflow/python/kernel_tests/py_func_test.py"
       # training tests
       "${tensorflow_source_dir}/tensorflow/python/training/basic_session_run_hooks_test.py"  # Needs tf.contrib fix.
+      "${tensorflow_source_dir}/tensorflow/python/training/evaluation_test.py"  # Needs tf.contrib fix.
       "${tensorflow_source_dir}/tensorflow/python/training/localhost_cluster_performance_test.py"  # Needs portpicker.
       "${tensorflow_source_dir}/tensorflow/python/training/monitored_session_test.py"  # Needs tf.contrib fix.
       "${tensorflow_source_dir}/tensorflow/python/training/saver_large_variable_test.py"  # Overflow error.
@@ -237,6 +243,8 @@ if (tensorflow_BUILD_CC_TESTS)
     "${tensorflow_source_dir}/tensorflow/cc/framework/gradients_test.cc"
     "${tensorflow_source_dir}/tensorflow/core/distributed_runtime/call_options_test.cc"
     "${tensorflow_source_dir}/tensorflow/core/distributed_runtime/tensor_coding_test.cc"
+    "${tensorflow_source_dir}/tensorflow/core/kernels/hexagon/graph_transferer_test.cc"
+    "${tensorflow_source_dir}/tensorflow/core/kernels/hexagon/quantized_matmul_op_for_hexagon_test.cc"
   )
 
   if (NOT tensorflow_ENABLE_GPU)
@@ -279,8 +287,6 @@ if (tensorflow_BUILD_CC_TESTS)
       "${tensorflow_source_dir}/tensorflow/core/kernels/quantization_utils_test.cc"
       "${tensorflow_source_dir}/tensorflow/core/kernels/quantize_and_dequantize_op_test.cc"
       "${tensorflow_source_dir}/tensorflow/core/kernels/quantize_down_and_shrink_range_op_test.cc"
-      "${tensorflow_source_dir}/tensorflow/core/kernels/hexagon/graph_transferer_test.cc"
-      "${tensorflow_source_dir}/tensorflow/core/kernels/hexagon/quantized_matmul_op_for_hexagon_test.cc"
       "${tensorflow_source_dir}/tensorflow/core/kernels/debug_ops_test.cc"
       "${tensorflow_source_dir}/tensorflow/core/kernels/quantized_activation_ops_test.cc"
       "${tensorflow_source_dir}/tensorflow/core/kernels/quantized_bias_add_op_test.cc"

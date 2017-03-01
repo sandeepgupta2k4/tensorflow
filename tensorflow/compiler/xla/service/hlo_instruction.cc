@@ -117,6 +117,7 @@ HloInstruction::CreateGetTupleElement(const Shape& shape,
     case HloOpcode::kCopy:
     case HloOpcode::kExp:
     case HloOpcode::kFloor:
+    case HloOpcode::kIsFinite:
     case HloOpcode::kLog:
     case HloOpcode::kLogicalNot:
     case HloOpcode::kNegate:
@@ -733,6 +734,7 @@ std::unique_ptr<HloInstruction> HloInstruction::CloneWithNewOperands(
     case HloOpcode::kCeil:
     case HloOpcode::kCopy:
     case HloOpcode::kExp:
+    case HloOpcode::kIsFinite:
     case HloOpcode::kFloor:
     case HloOpcode::kLog:
     case HloOpcode::kLogicalNot:
@@ -1033,6 +1035,7 @@ bool HloInstruction::Identical(
     case HloOpcode::kFloor:
     case HloOpcode::kGe:
     case HloOpcode::kGt:
+    case HloOpcode::kIsFinite:
     case HloOpcode::kLe:
     case HloOpcode::kLog:
     case HloOpcode::kLogicalAnd:
@@ -1447,10 +1450,12 @@ string HloInstruction::ToString(bool compact_operands) const {
 string HloInstruction::ToShortString() const {
   return tensorflow::strings::Printf(
       "%s = %s(%s)", name().c_str(), HloOpcodeString(opcode()).c_str(),
-      tensorflow::str_util::Join(operands_, ", ", [](string* out,
-                                                     HloInstruction* operand) {
-        tensorflow::strings::StrAppend(out, operand->name());
-      }).c_str());
+      tensorflow::str_util::Join(operands_, ", ",
+                                 [](string* out, HloInstruction* operand) {
+                                   tensorflow::strings::StrAppend(
+                                       out, operand->name());
+                                 })
+          .c_str());
 }
 
 string HloInstruction::ToCategory() const {
@@ -1482,10 +1487,20 @@ string HloInstruction::ToCategory() const {
         return "rank-1-broadcast binary fusion";
       }
     }
-    if (IsElementwise()) {
-      return "elementwise fusion";
-    } else {
-      return "non-elementwise fusion";
+    switch (fusion_kind()) {
+      case FusionKind::kLoop:
+        if (IsElementwise()) {
+          return "elementwise fusion";
+        } else {
+          return "non-elementwise fusion";
+        }
+      case FusionKind::kInput:
+        return "reduce fusion";
+      case FusionKind::kTransposeDot:
+        return "dot fusion";
+      case FusionKind::kConvBackwardFilter:
+      case FusionKind::kConvBackwardInput:
+        return "convolution fusion";
     }
   }
 
@@ -1494,6 +1509,15 @@ string HloInstruction::ToCategory() const {
   }
 
   return HloOpcodeString(opcode());
+}
+
+string HloInstruction::FullyQualifiedName() const {
+  if (IsFused()) {
+    return tensorflow::strings::StrCat(fusion_instruction()->parent()->name(),
+                                       "::", fusion_instruction()->name(),
+                                       "::", name_);
+  }
+  return tensorflow::strings::StrCat(parent_->name(), "::", name_);
 }
 
 HloInstruction* HloInstruction::tracing() const { return trace_instruction_; }
@@ -1528,6 +1552,10 @@ bool HloInstruction::IsFusable() const {
     case HloOpcode::kSend:
     case HloOpcode::kRecv:
       return false;
+    // Only fuse Rng if it is used once, otherwise the random numbers generated
+    // will be different in each fusion.
+    case HloOpcode::kRng:
+      return users_.size() == 1;
     default:
       return true;
   }
@@ -1548,6 +1576,11 @@ HloInstruction* HloInstruction::fused_parameter(int64 parameter_number) const {
   CHECK_GE(parameter_number, 0);
   CHECK_LT(parameter_number, fused_parameters_.size());
   return fused_parameters_[parameter_number];
+}
+
+const std::vector<HloInstruction*>& HloInstruction::fused_parameters() const {
+  CHECK_EQ(opcode_, HloOpcode::kFusion);
+  return fused_parameters_;
 }
 
 const std::list<std::unique_ptr<HloInstruction>>&
@@ -1643,6 +1676,8 @@ Status HloInstruction::Visit(DfsHloVisitor* visitor) {
       return visitor->HandleLog(this, operands_[0]);
     case HloOpcode::kTanh:
       return visitor->HandleTanh(this, operands_[0]);
+    case HloOpcode::kIsFinite:
+      return visitor->HandleIsFinite(this, operands_[0]);
     case HloOpcode::kLogicalNot:
       return visitor->HandleLogicalNot(this, operands_[0]);
     case HloOpcode::kBitcast:
@@ -1846,6 +1881,7 @@ bool HloInstruction::IsElementwise() const {
     case HloOpcode::kCopy:
     case HloOpcode::kExp:
     case HloOpcode::kFloor:
+    case HloOpcode::kIsFinite:
     case HloOpcode::kLog:
     case HloOpcode::kLogicalNot:
     case HloOpcode::kNegate:
@@ -1879,6 +1915,7 @@ bool HloInstruction::IsElementwise() const {
       return true;
 
     // Other operations.
+    case HloOpcode::kRng:
     case HloOpcode::kMap:
       return true;
     case HloOpcode::kFusion:

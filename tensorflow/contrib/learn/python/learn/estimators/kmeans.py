@@ -33,15 +33,14 @@ from tensorflow.python.ops.control_flow_ops import with_dependencies
 from tensorflow.python.training import session_run_hook
 from tensorflow.python.training.session_run_hook import SessionRunArgs
 
-SQUARED_EUCLIDEAN_DISTANCE = clustering_ops.SQUARED_EUCLIDEAN_DISTANCE
-COSINE_DISTANCE = clustering_ops.COSINE_DISTANCE
-RANDOM_INIT = clustering_ops.RANDOM_INIT
-KMEANS_PLUS_PLUS_INIT = clustering_ops.KMEANS_PLUS_PLUS_INIT
-
 
 # TODO(agarwal,ands): support sharded input.
 class KMeansClustering(estimator.Estimator):
   """An Estimator for K-Means clustering."""
+  SQUARED_EUCLIDEAN_DISTANCE = clustering_ops.SQUARED_EUCLIDEAN_DISTANCE
+  COSINE_DISTANCE = clustering_ops.COSINE_DISTANCE
+  RANDOM_INIT = clustering_ops.RANDOM_INIT
+  KMEANS_PLUS_PLUS_INIT = clustering_ops.KMEANS_PLUS_PLUS_INIT
   SCORES = 'scores'
   CLUSTER_IDX = 'cluster_idx'
   CLUSTERS = 'clusters'
@@ -51,10 +50,11 @@ class KMeansClustering(estimator.Estimator):
   def __init__(self,
                num_clusters,
                model_dir=None,
-               initial_clusters=clustering_ops.RANDOM_INIT,
-               distance_metric=clustering_ops.SQUARED_EUCLIDEAN_DISTANCE,
+               initial_clusters=RANDOM_INIT,
+               distance_metric=SQUARED_EUCLIDEAN_DISTANCE,
                random_seed=0,
                use_mini_batch=True,
+               mini_batch_steps_per_iteration=1,
                kmeans_plus_plus_num_retries=2,
                relative_tolerance=None,
                config=None):
@@ -70,6 +70,9 @@ class KMeansClustering(estimator.Estimator):
       random_seed: Python integer. Seed for PRNG used to initialize centers.
       use_mini_batch: If true, use the mini-batch k-means algorithm. Else assume
         full batch.
+      mini_batch_steps_per_iteration: number of steps after which the updated
+        cluster centers are synced back to a master copy. See clustering_ops.py
+        for more details.
       kmeans_plus_plus_num_retries: For each point that is sampled during
         kmeans++ initialization, this parameter specifies the number of
         additional points to draw from the current distribution before selecting
@@ -85,6 +88,7 @@ class KMeansClustering(estimator.Estimator):
     self._distance_metric = distance_metric
     self._random_seed = random_seed
     self._use_mini_batch = use_mini_batch
+    self._mini_batch_steps_per_iteration = mini_batch_steps_per_iteration
     self._kmeans_plus_plus_num_retries = kmeans_plus_plus_num_retries
     self._relative_tolerance = relative_tolerance
     super(KMeansClustering, self).__init__(
@@ -194,9 +198,11 @@ class KMeansClustering(estimator.Estimator):
        training_op) = clustering_ops.KMeans(
            self._parse_tensor_or_dict(features),
            self._num_clusters,
-           self._training_initial_clusters,
-           self._distance_metric,
-           self._use_mini_batch,
+           initial_clusters=self._training_initial_clusters,
+           distance_metric=self._distance_metric,
+           use_mini_batch=self._use_mini_batch,
+           mini_batch_steps_per_iteration=(
+               self._mini_batch_steps_per_iteration),
            random_seed=self._random_seed,
            kmeans_plus_plus_num_retries=self.
            _kmeans_plus_plus_num_retries).training_graph()

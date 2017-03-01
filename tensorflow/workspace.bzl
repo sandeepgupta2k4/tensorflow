@@ -36,11 +36,17 @@ def check_version(bazel_version):
           native.bazel_version, bazel_version))
   pass
 
+def _repos_are_siblings():
+  return Label("@foo//bar").workspace_root.startswith("../")
+
 # Temporary workaround to support including TensorFlow as a submodule until this
 # use-case is supported in the next Bazel release.
 def _temp_workaround_http_archive_impl(repo_ctx):
    repo_ctx.template("BUILD", repo_ctx.attr.build_file,
-                     {"%ws%": repo_ctx.attr.repository}, False)
+                     {
+                         "%prefix%" : ".." if _repos_are_siblings() else "external",
+                         "%ws%": repo_ctx.attr.repository
+                     }, False)
    repo_ctx.download_and_extract(repo_ctx.attr.urls, "", repo_ctx.attr.sha256,
                                  "", repo_ctx.attr.strip_prefix)
 
@@ -67,11 +73,11 @@ def tf_workspace(path_prefix = "", tf_repo_name = ""):
   native.new_http_archive(
       name = "eigen_archive",
       urls = [
-          "http://bazel-mirror.storage.googleapis.com/bitbucket.org/eigen/eigen/get/60578b474802.tar.gz",
-          "https://bitbucket.org/eigen/eigen/get/60578b474802.tar.gz",
+          "http://bazel-mirror.storage.googleapis.com/bitbucket.org/eigen/eigen/get/290bfb42684a.tar.gz",
+          "https://bitbucket.org/eigen/eigen/get/290bfb42684a.tar.gz",
       ],
-      sha256 = "7527cda827aff351981ebd910012e16be4d899c28a9ae7f143ae60e7f3f7b83d",
-      strip_prefix = "eigen-eigen-60578b474802",
+      sha256 = "269c8bf20e8ac1aa8f5caf1ab2ca7be4909ec6ae085177a647aae138cd069b12",
+      strip_prefix = "eigen-eigen-290bfb42684a",
       build_file = str(Label("//third_party:eigen.BUILD")),
   )
 
@@ -214,11 +220,11 @@ def tf_workspace(path_prefix = "", tf_repo_name = ""):
   native.http_archive(
       name = "protobuf",
       urls = [
-          "http://bazel-mirror.storage.googleapis.com/github.com/google/protobuf/archive/9d3288e651700f3d52e6b4ead2a9f9ab02da53f4.tar.gz",
-          "https://github.com/google/protobuf/archive/9d3288e651700f3d52e6b4ead2a9f9ab02da53f4.tar.gz",
+          "http://bazel-mirror.storage.googleapis.com/github.com/google/protobuf/archive/ef927cc428db7bf41d3a593a16a8f1a0fe6306c5.tar.gz",
+          "https://github.com/google/protobuf/archive/ef927cc428db7bf41d3a593a16a8f1a0fe6306c5.tar.gz",
       ],
-      sha256 = "4663e886f9bbea0121ce424e1620997a37d38c6299dc82183223a0401bbf70ed",
-      strip_prefix = "protobuf-9d3288e651700f3d52e6b4ead2a9f9ab02da53f4",
+      sha256 = "8813a4ab27f7c61565d0db17d69236b4ec0b1404371efc728f15079b85e457ca",
+      strip_prefix = "protobuf-ef927cc428db7bf41d3a593a16a8f1a0fe6306c5",
   )
 
   native.new_http_archive(
@@ -270,7 +276,7 @@ def tf_workspace(path_prefix = "", tf_repo_name = ""):
       build_file = str(Label("//third_party:swig.BUILD")),
   )
 
-  native.new_http_archive(
+  temp_workaround_http_archive(
       name = "curl",
       sha256 = "ff3e80c1ca6a068428726cd7dd19037a47cc538ce58ef61c59587191039b2ca6",
       urls = [
@@ -332,11 +338,11 @@ def tf_workspace(path_prefix = "", tf_repo_name = ""):
   temp_workaround_http_archive(
       name = "llvm",
       urls = [
-          "http://bazel-mirror.storage.googleapis.com/github.com/llvm-mirror/llvm/archive/2276fd31f36aa58f39397c435a8be6632d8c8505.tar.gz",
-          "https://github.com/llvm-mirror/llvm/archive/2276fd31f36aa58f39397c435a8be6632d8c8505.tar.gz",
+          "http://bazel-mirror.storage.googleapis.com/github.com/llvm-mirror/llvm/archive/94403df1ddb4cf9af6ac7dcbbd629fcc22e19db9.tar.gz",
+          "https://github.com/llvm-mirror/llvm/archive/94403df1ddb4cf9af6ac7dcbbd629fcc22e19db9.tar.gz",
       ],
-      sha256 = "0e08c91752732227280466d12f330a5854569deddf28ff4a6c3898334dbb0d16",
-      strip_prefix = "llvm-2276fd31f36aa58f39397c435a8be6632d8c8505",
+      sha256 = "87ce84c0d5496eeaf92e4948e76afe6bb35094de18efb3c7ce59ab4cfccdbef0",
+      strip_prefix = "llvm-94403df1ddb4cf9af6ac7dcbbd629fcc22e19db9",
       build_file = str(Label("//third_party/llvm:llvm.BUILD")),
       repository = tf_repo_name,
   )
@@ -399,12 +405,16 @@ def tf_workspace(path_prefix = "", tf_repo_name = ""):
       actual = "@zlib_archive//:zlib",
   )
 
-  native.new_http_archive(
+  temp_workaround_http_archive(
       name = "nccl_archive",
-      url = "https://github.com/nvidia/nccl/archive/024d1e267845f2ed06f3e2e42476d50f04a00ee6.tar.gz",
+      urls = [
+          "http://bazel-mirror.storage.googleapis.com/github.com/nvidia/nccl/archive/024d1e267845f2ed06f3e2e42476d50f04a00ee6.tar.gz",
+          "https://github.com/nvidia/nccl/archive/024d1e267845f2ed06f3e2e42476d50f04a00ee6.tar.gz",
+      ],
       sha256 = "6787f0eed88d52ee8e32956fa4947d92c139da469f1d8e311c307f27d641118e",
       strip_prefix = "nccl-024d1e267845f2ed06f3e2e42476d50f04a00ee6",
       build_file = str(Label("//third_party:nccl.BUILD")),
+      repository = tf_repo_name,
   )
 
   # Make junit-4.12 available as //external:junit
@@ -484,13 +494,13 @@ def tf_workspace(path_prefix = "", tf_repo_name = ""):
       name = "com_microsoft_typescript",
       licenses = ["notice"],  # Apache 2.0
       sha256_urls = {
-          "92ae664a574c87a60ed0dc3aa08a28e366477ae40bc7ab23b512710d5c5b51cc": [
-              "http://bazel-mirror.storage.googleapis.com/raw.githubusercontent.com/Microsoft/TypeScript/v2.0.6/lib/tsc.js",
-              "https://raw.githubusercontent.com/Microsoft/TypeScript/v2.0.6/lib/tsc.js",
+          "e3d9e320a2cae99be4aaa37953961a48323cdf16ba9aa2557a44d69571cd9b8d": [
+              "http://bazel-mirror.storage.googleapis.com/raw.githubusercontent.com/Microsoft/TypeScript/v2.1.6/lib/tsc.js",
+              "https://raw.githubusercontent.com/Microsoft/TypeScript/v2.1.6/lib/tsc.js",
           ],
-          "f4de46e04293569a666f2045f850d90e16dc8ba059af02b5a062942245007a71": [
-              "http://bazel-mirror.storage.googleapis.com/raw.githubusercontent.com/Microsoft/TypeScript/v2.0.6/lib/lib.es6.d.ts",
-              "https://raw.githubusercontent.com/Microsoft/TypeScript/v2.0.6/lib/lib.es6.d.ts",
+          "f189cebe96eb76b238c6e364e72d4b0324e699f83eeae5deac23506cb3764fc6": [
+              "http://bazel-mirror.storage.googleapis.com/raw.githubusercontent.com/Microsoft/TypeScript/v2.1.6/lib/lib.es6.d.ts",
+              "https://raw.githubusercontent.com/Microsoft/TypeScript/v2.1.6/lib/lib.es6.d.ts",
           ],
       },
       extra_build_file_content = "\n".join([

@@ -21,6 +21,24 @@ config_setting(
 )
 
 config_setting(
+    name = "android_x86",
+    values = {
+        "crosstool_top": "//external:android/crosstool",
+        "cpu": "x86",
+    },
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "android_x86_64",
+    values = {
+        "crosstool_top": "//external:android/crosstool",
+        "cpu": "x86_64",
+    },
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
     name = "android_arm",
     values = {
         "crosstool_top": "//external:android/crosstool",
@@ -83,6 +101,12 @@ config_setting(
     values = {
         "compilation_mode": "opt",
     },
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "freebsd",
+    values = {"cpu": "freebsd"},
     visibility = ["//visibility:public"],
 )
 
@@ -154,7 +178,9 @@ filegroup(
         "//tensorflow/contrib/framework:all_files",
         "//tensorflow/contrib/graph_editor:all_files",
         "//tensorflow/contrib/grid_rnn:all_files",
+        "//tensorflow/contrib/hooks:all_files",
         "//tensorflow/contrib/image:all_files",
+        "//tensorflow/contrib/imperative:all_files",
         "//tensorflow/contrib/input_pipeline:all_files",
         "//tensorflow/contrib/input_pipeline/kernels:all_files",
         "//tensorflow/contrib/integrate:all_files",
@@ -211,14 +237,13 @@ filegroup(
         "//tensorflow/examples/tutorials/estimators:all_files",
         "//tensorflow/examples/tutorials/mnist:all_files",
         "//tensorflow/examples/tutorials/word2vec:all_files",
-        "//tensorflow/g3doc/how_tos/adding_an_op:all_files",
-        "//tensorflow/g3doc/tutorials:all_files",
         "//tensorflow/go:all_files",
         "//tensorflow/java:all_files",
         "//tensorflow/java/src/main/java/org/tensorflow/examples:all_files",
         "//tensorflow/java/src/main/native:all_files",
         "//tensorflow/python:all_files",
         "//tensorflow/python/debug:all_files",
+        "//tensorflow/python/estimator:all_files",
         "//tensorflow/python/kernel_tests:all_files",
         "//tensorflow/python/saved_model:all_files",
         "//tensorflow/python/tools:all_files",
@@ -274,15 +299,6 @@ filegroup(
 # -------------------------------------------
 cc_binary(
     name = "libtensorflow.so",
-    linkshared = 1,
-    deps = [
-        "//tensorflow/c:c_api",
-        "//tensorflow/core:tensorflow",
-    ],
-)
-
-cc_binary(
-    name = "libtensorflow_c.so",
     linkshared = 1,
     deps = [
         "//tensorflow/c:c_api",

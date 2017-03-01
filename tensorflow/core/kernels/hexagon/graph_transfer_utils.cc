@@ -49,16 +49,49 @@ GraphTransferUtils::GetTopNFloatResults(const float* const data,
   }
 }
 
+/* static */ RemoteFusedGraphExecuteInfo
+GraphTransferUtils::BuildRemoteFusedGraphExecuteInfo(
+    const GraphTransferInfo& graph_transfer_info) {
+  RemoteFusedGraphExecuteInfo execute_info;
+  execute_info.set_executor_name("build_hexagon_remote_fused_graph_executor");
+  for (const GraphTransferInfo::GraphInputNodeInfo& input :
+       graph_transfer_info.graph_input_node_info()) {
+    RemoteFusedGraphExecuteInfo::GraphIONodeInfo& graph_input_node_info =
+        *execute_info.add_graph_input_node_info();
+    graph_input_node_info.set_name(input.name());
+    for (const int64 dim : input.shape()) {
+      graph_input_node_info.add_shape(dim);
+    }
+  }
+
+  for (const GraphTransferInfo::GraphOutputNodeInfo& output :
+       graph_transfer_info.graph_output_node_info()) {
+    RemoteFusedGraphExecuteInfo::GraphIONodeInfo& graph_output_node_info =
+        *execute_info.add_graph_output_node_info();
+    graph_output_node_info.set_name(output.name());
+    for (const int64 dim : output.shape()) {
+      graph_output_node_info.add_shape(dim);
+    }
+  }
+
+  execute_info.set_serialized_executor_parameters(
+      graph_transfer_info.SerializeAsString());
+  return execute_info;
+}
+
 /* static */ GraphDef GraphTransferUtils::BuildFusedGraphDef(
+    const IGraphTransferOpsDefinitions& ops_definitions,
     const string& remote_graph_execute_name,
     const std::vector<GraphTransferer::InputNodeInfo>& inputs,
     const std::vector<string>& outputs, const GraphDef& def,
     GraphTransferer* const gt) {
   CHECK(gt != nullptr);
-  std::vector<tensorflow::Tensor> output_tensors;
-  Status status = gt->DryRunInference(
-      def, inputs, outputs, false /* initialize_by_zero */, &output_tensors);
+  GraphTransferer::OutputTensorInfo output_tensor_info;
+  Status status = gt->DryRunInferenceForAllNode(
+      def, inputs, true /* initialize_by_zero */, &output_tensor_info);
   CHECK(status.ok());
+  status = gt->LoadGraphFromProto(ops_definitions, def, inputs, outputs, false,
+                                  output_tensor_info.output_tensor_map);
 
   Scope root = Scope::NewRootScope();
   std::vector<Output> output_list;
@@ -74,9 +107,12 @@ GraphTransferUtils::GetTopNFloatResults(const float* const data,
     CHECK(scope.ok());
     output_list.emplace_back(Output(ret, 0));
   }
-  string serialized_graph = gt->GetGraphTransferInfo().SerializeAsString();
+
+  const RemoteFusedGraphExecuteInfo execute_info =
+      BuildRemoteFusedGraphExecuteInfo(gt->GetGraphTransferInfo());
 
   const Scope& scope = root.WithOpName(remote_graph_execute_name);
+  CHECK(scope.ok());
   auto node_out_list = ops::AsNodeOutList(scope, InputList(output_list));
   Node* node;
   const auto unique_name = scope.GetUniqueNameForOp("RemoteFusedGraphExecute");
@@ -84,13 +120,14 @@ GraphTransferUtils::GetTopNFloatResults(const float* const data,
                      .Input(node_out_list)
                      .Attr("N", static_cast<int64>(outputs.size()))
                      .Attr("serialized_graph_transfer_info",
-                           StringPiece(serialized_graph));
+                           StringPiece(execute_info.SerializeAsString()));
+  CHECK(scope.ok());
   scope.UpdateBuilder(&builder);
   scope.UpdateStatus(builder.Finalize(scope.graph(), &node));
   CHECK(scope.ok());
 
   GraphDef fusedGraphDef;
-  root.ToGraphDef(&fusedGraphDef);
+  TF_CHECK_OK(root.ToGraphDef(&fusedGraphDef));
   return fusedGraphDef;
 }
 
