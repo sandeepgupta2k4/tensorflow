@@ -166,6 +166,18 @@ void SetMemory(NodeExecStats* nt, OpKernelContext* ctx) {
       memory->set_live_bytes(std::get<2>(sizes));
     }
   }
+  auto* ms = nt->mutable_memory_stats();
+  ms->set_host_temp_memory_size(ctx->host_temp_memory_size());
+  ms->set_device_temp_memory_size(ctx->device_temp_memory_size());
+  for (const auto& alloc_id : ctx->host_persistent_alloc_ids()) {
+    ms->mutable_host_persistent_tensor_alloc_ids()->Add(alloc_id);
+  }
+  for (const auto& alloc_id : ctx->device_persistent_alloc_ids()) {
+    ms->mutable_device_persistent_tensor_alloc_ids()->Add(alloc_id);
+  }
+  ms->set_host_persistent_memory_size(ctx->host_persistent_memory_allocated());
+  ms->set_device_persistent_memory_size(
+      ctx->device_persistent_memory_allocated());
 }
 
 void SetReferencedTensors(NodeExecStats* nt,
@@ -220,7 +232,7 @@ struct NodeItem {
   int input_start = 0;
 
   // Number of output edges.
-  int num_output_edges;
+  size_t num_output_edges;
 
   PendingCounts::Handle pending_id;
 
@@ -295,7 +307,7 @@ class GraphView {
   void Initialize(const Graph* g);
   Status SetAllocAttrs(const Graph* g, const Device* device);
 
-  NodeItem* node(int id) const {
+  NodeItem* node(size_t id) const {
     DCHECK_GE(id, 0);
     DCHECK_LT(id, num_nodes_);
     uint32 offset = node_offsets_[id];
@@ -421,9 +433,9 @@ class ExecutorImpl : public Executor {
 // connected to n by a single edge, but might be a downstream
 // consumer of n's output by reference.  *attr is updated with any
 // necessary attributes.
-static Status InferAllocAttr(const Node* n, const Node* dst,
-                             const DeviceNameUtils::ParsedName& local_dev_name,
-                             AllocatorAttributes* attr);
+Status InferAllocAttr(const Node* n, const Node* dst,
+                      const DeviceNameUtils::ParsedName& local_dev_name,
+                      AllocatorAttributes* attr);
 
 GraphView::~GraphView() {
   static_assert(std::is_trivially_destructible<AllocatorAttributes>::value,
@@ -442,7 +454,7 @@ GraphView::~GraphView() {
 }
 
 size_t GraphView::NodeItemBytes(const Node* n) {
-  const int num_output_edges = n->out_edges().size();
+  const size_t num_output_edges = n->out_edges().size();
   const int num_inputs = n->num_inputs();
   const int num_outputs = n->num_outputs();
 
@@ -478,7 +490,7 @@ char* GraphView::InitializeNode(char* ptr, const Node* n) {
   CHECK(node_offsets_[id] == kuint32max);  // Initial value in constructor
 
   const size_t bytes = NodeItemBytes(n);
-  static constexpr size_t kItemAlignment = sizeof(NodeItem*);
+  constexpr size_t kItemAlignment = sizeof(NodeItem*);
   CHECK_EQ(reinterpret_cast<uintptr_t>(ptr) % kItemAlignment, 0);
   NodeItem* item = reinterpret_cast<NodeItem*>(ptr);
 
@@ -488,11 +500,11 @@ char* GraphView::InitializeNode(char* ptr, const Node* n) {
   // pointers). Casting to int64 is needed on 32bit CPU to avoid comparing
   // values as "int" vs "size_t" in CHECK_LE.
   CHECK_LE(static_cast<int64>(ptr - space_), kuint32max);
-  const uint32 offset = ptr - space_;
+  const uint32 offset = static_cast<uint32>(ptr - space_);
   node_offsets_[id] = offset;
   ptr += bytes;
 
-  const int num_output_edges = n->out_edges().size();
+  const size_t num_output_edges = n->out_edges().size();
   const int num_inputs = n->num_inputs();
   const int num_outputs = n->num_outputs();
 
@@ -568,10 +580,10 @@ void GraphView::Initialize(const Graph* g) {
   CHECK_EQ(ptr, space_ + total_bytes);
 }
 
-static void GetMaxPendingCounts(const Node* n, int* max_pending,
-                                int* max_dead_count) {
-  const int num_in_edges = n->in_edges().size();
-  int initial_count;
+void GetMaxPendingCounts(const Node* n, size_t* max_pending,
+                         size_t* max_dead_count) {
+  const size_t num_in_edges = n->in_edges().size();
+  size_t initial_count;
   if (IsMerge(n)) {
     // merge waits all control inputs so we initialize the pending
     // count to be the number of control edges.
@@ -615,8 +627,7 @@ Status ExecutorImpl::Initialize() {
     FrameInfo* frame_info = EnsureFrameInfo(frame_name);
 
     // See if this node is a root node, and if so, add to root_nodes_.
-    const int num_in_edges = n->in_edges().size();
-    if (num_in_edges == 0) {
+    if (n->in_edges().empty()) {
       root_nodes_.push_back(n);
     }
 
@@ -648,7 +659,7 @@ Status ExecutorImpl::Initialize() {
     // pending counts data structure, and allocate a handle in
     // that frame's pending counts data structure that has enough
     // space to store these maximal count values.
-    int max_pending, max_dead;
+    size_t max_pending, max_dead;
     GetMaxPendingCounts(n, &max_pending, &max_dead);
     item->pending_id =
         frame_info->pending_counts_layout.CreateHandle(max_pending, max_dead);
@@ -680,31 +691,33 @@ Status GraphView::SetAllocAttrs(const Graph* g, const Device* device) {
     // Examine the out edges of each node looking for special use
     // cases that may affect memory allocation attributes.
     for (auto e : n->out_edges()) {
-      AllocatorAttributes attr;
-      s = InferAllocAttr(n, e->dst(), local_dev_name, &attr);
-      if (!s.ok()) return s;
-      if (attr.value != 0) {
-        if (!e->IsControlEdge()) {
+      if (!e->IsControlEdge()) {
+        AllocatorAttributes attr;
+        s = InferAllocAttr(n, e->dst(), local_dev_name, &attr);
+        if (!s.ok()) return s;
+        if (attr.value != 0) {
           attrs[e->src_output()].Merge(attr);
         }
       }
     }
 
     for (int out = 0; out < n->num_outputs(); out++) {
-      OpKernel* op_kernel = item->kernel;
+      const OpKernel* op_kernel = item->kernel;
       DCHECK_LT(out, op_kernel->output_memory_types().size());
       bool on_host = op_kernel->output_memory_types()[out] == HOST_MEMORY;
-      AllocatorAttributes h;
-      h.set_on_host(on_host);
-      attrs[out].Merge(h);
+      if (on_host) {
+        AllocatorAttributes h;
+        h.set_on_host(on_host);
+        attrs[out].Merge(h);
+      }
     }
   }
   return s;
 }
 
-static Status InferAllocAttr(const Node* n, const Node* dst,
-                             const DeviceNameUtils::ParsedName& local_dev_name,
-                             AllocatorAttributes* attr) {
+Status InferAllocAttr(const Node* n, const Node* dst,
+                      const DeviceNameUtils::ParsedName& local_dev_name,
+                      AllocatorAttributes* attr) {
   Status s;
   // Note that it's possible for *n to be a Recv and *dst to be a Send,
   // so these two cases are not mutually exclusive.
@@ -758,11 +771,6 @@ static Status InferAllocAttr(const Node* n, const Node* dst,
     } else {
       VLOG(2) << "default alloc case local type " << local_dev_name.type
               << " remote type " << parsed_dst_name.type;
-    }
-  } else if (dst->type_string() == "ToFloat") {
-    for (auto e : dst->out_edges()) {
-      s = InferAllocAttr(n, e->dst(), local_dev_name, attr);
-      if (!s.ok()) return s;
     }
   }
   return s;
@@ -835,6 +843,7 @@ class ExecutorState {
       if (val_field_is_set) {
         val.Destroy();
         val_field_is_set = false;
+        has_value = false;
       }
     }
 
@@ -887,7 +896,7 @@ class ExecutorState {
     Entry* input_tensors;
 
     // The number of outstanding ops for each iteration.
-    int outstanding_ops;
+    size_t outstanding_ops;
 
     // The number of outstanding frames for each iteration.
     int outstanding_frame_count;
@@ -1028,13 +1037,13 @@ class ExecutorState {
 
     inline IterationState* GetIteration(int64 iter)
         EXCLUSIVE_LOCKS_REQUIRED(mu) {
-      int index = iter % iterations.size();
+      size_t index = iter % iterations.size();
       return iterations[index];
     }
 
     inline void SetIteration(int64 iter, IterationState* state)
         EXCLUSIVE_LOCKS_REQUIRED(mu) {
-      int index = iter % iterations.size();
+      size_t index = iter % iterations.size();
       DCHECK(state == nullptr || iterations[index] == nullptr);
       iterations[index] = state;
     }
@@ -1395,7 +1404,7 @@ void ExecutorImpl::InitializePending(const Graph* graph,
   for (const Node* n : graph->nodes()) {
     const int id = n->id();
     const string& name = cf_info.frame_names[id];
-    int max_pending, max_dead;
+    size_t max_pending, max_dead;
     GetMaxPendingCounts(n, &max_pending, &max_dead);
     const NodeItem* item = gview_.node(id);
     PendingCounts* counts = EnsureFrameInfo(name)->pending_counts;
@@ -1425,7 +1434,7 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
   } else {
     num_outstanding_ops_ = ready.size();
     root_frame_->iterations[0]->outstanding_ops = ready.size();
-    done_cb_ = done;
+    done_cb_ = std::move(done);
     // Schedule to run all the ready ops in thread pool.
     ScheduleReady(ready, nullptr);
   }
@@ -1545,7 +1554,8 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_usec) {
 
     if (vlog_) {
       VLOG(1) << "Process node: " << id << " step " << params.step_id << " "
-              << SummarizeNodeDef(node->def());
+              << SummarizeNodeDef(node->def())
+              << " is dead: " << tagged_node.is_dead;
     }
 
     Entry* input_tensors = GetInputTensors(input_frame, input_iter);
@@ -1728,11 +1738,14 @@ Status ExecutorState::PrepareInputs(const NodeItem& item, Entry* first_input,
       }
       inp->tensor = entry->val.get();
     } else {
-      if (!entry->ref->IsInitialized() && !IsInitializationOp(item.node)) {
-        return AttachDef(
-            errors::FailedPrecondition("Attempting to use uninitialized value ",
-                                       item.kernel->def().input(i)),
-            item.kernel->def());
+      {
+        mutex_lock ml(*entry->ref_mu);
+        if (!entry->ref->IsInitialized() && !IsInitializationOp(item.node)) {
+          return AttachDef(errors::FailedPrecondition(
+                               "Attempting to use uninitialized value ",
+                               item.kernel->def().input(i)),
+                           item.kernel->def());
+        }
       }
       if (expect_ref) {
         inp->mutex_if_ref = entry->ref_mu;
@@ -1809,8 +1822,13 @@ Status ExecutorState::ProcessOutputs(const NodeItem& item, OpKernelContext* ctx,
       out->alloc_attr = ctx->output_alloc_attr(i);
 
       // Sanity check of output tensor types.
-      DataType dtype = val->dtype();
-      if (val.is_ref()) dtype = MakeRefType(dtype);
+      DataType dtype;
+      if (val.is_ref()) {
+        mutex_lock ml(*val.mutex_if_ref);
+        dtype = MakeRefType(val->dtype());
+      } else {
+        dtype = val->dtype();
+      }
       if (dtype == item.output_type(i)) {
         if (stats && val.tensor->IsInitialized()) {
           nodestats::SetOutput(stats, i, val.tensor);
@@ -2009,7 +2027,7 @@ bool ExecutorState::NodeDone(const Status& s, const Node* node,
   }
 
   bool completed = false;
-  int ready_size = ready.size();
+  size_t ready_size = ready.size();
   if (ready_size == 0 || !s.ok()) {
     completed = (num_outstanding_ops_.fetch_sub(1) == 1);
   } else if (ready_size > 1) {
@@ -2357,10 +2375,10 @@ void ExecutorState::FrameState::ActivateNodes(const NodeItem* item,
                                               TaggedNodeSeq* ready) {
   const GraphView& gview = executor->gview_;
   IterationState* iter_state = GetIteration(iter);
-  const int num_output_edges = item->num_output_edges;
+  const size_t num_output_edges = item->num_output_edges;
   const EdgeInfo* edges = item->output_edge_list();
   Entry* input_tensors = iter_state->input_tensors;
-  for (int out_index = 0; out_index < num_output_edges; out_index++) {
+  for (size_t out_index = 0; out_index < num_output_edges; out_index++) {
     const EdgeInfo& e = edges[out_index];
     const int dst_id = e.dst_id;
     const NodeItem* dst_item = gview.node(dst_id);
@@ -2542,7 +2560,7 @@ bool ExecutorState::FrameState::CleanupIterations(const GraphView* gview,
 }
 
 void ExecutorImpl::RunAsync(const Args& args, DoneCallback done) {
-  (new ExecutorState(args, this))->RunAsync(done);
+  (new ExecutorState(args, this))->RunAsync(std::move(done));
 }
 
 }  // end namespace

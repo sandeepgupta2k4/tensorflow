@@ -24,16 +24,16 @@ limitations under the License.
 #include "tensorflow/compiler/xla/legacy_flags/cpu_compiler_flags.h"
 #include "tensorflow/compiler/xla/literal_util.h"
 #include "tensorflow/compiler/xla/statusor.h"
-#include "tensorflow/compiler/xla/test_helpers.h"
+#include "tensorflow/compiler/xla/test.h"
 #include "tensorflow/compiler/xla/tests/client_library_test_base.h"
 #include "tensorflow/compiler/xla/tests/literal_test_util.h"
 #include "tensorflow/compiler/xla/tests/test_macros.h"
-#include "tensorflow/core/platform/test.h"
 
 namespace xla {
 namespace {
 
 using BroadcastSimpleTest = ClientLibraryTestBase;
+using ::testing::HasSubstr;
 
 XLA_TEST_F(BroadcastSimpleTest, ScalarNoOpBroadcast) {
   ComputationBuilder b(client_, TestName());
@@ -46,6 +46,19 @@ XLA_TEST_F(BroadcastSimpleTest, ScalarTo2D_2x3) {
   b.Broadcast(b.ConstantR0<float>(2.25), {2, 3});
   Array2D<float> expected(2, 3, 2.25);
   ComputeAndCompareR2<float>(&b, expected, {}, ErrorSpec(0.0001));
+}
+
+XLA_TEST_F(BroadcastSimpleTest, ScalarParamTo2D_2x3) {
+  ComputationBuilder b(client_, TestName());
+  ComputationDataHandle src;
+  std::unique_ptr<GlobalData> param_data =
+      CreateR0Parameter<float>(2.25f, /*parameter_number=*/0, /*name=*/"src",
+                               /*builder=*/&b, /*data_handle=*/&src);
+
+  b.Broadcast(src, {2, 3});
+  Array2D<float> expected(2, 3, 2.25);
+  ComputeAndCompareR2<float>(&b, expected, {param_data.get()},
+                             ErrorSpec(0.0001));
 }
 
 XLA_TEST_F(BroadcastSimpleTest, ScalarTo2D_2x0) {
@@ -174,6 +187,27 @@ XLA_TEST_F(BroadcastSimpleTest, Add1DTo3DInDimAll) {
   ComputeAndCompareLiteral(&b, *expected, {}, ErrorSpec(0.0001));
 }
 
+XLA_TEST_F(BroadcastSimpleTest, Add1DTo3DInDimAllWithScalarBroadcast) {
+  ComputationBuilder b(client_, TestName());
+  auto r1_0 = b.ConstantR1<float>({1000, 2000});
+  auto r1_1 = b.ConstantR1<float>({100, 200});
+  auto r1_2 = b.ConstantR1<float>({10, 20});
+  auto r0 = b.ConstantR0<float>(3);
+  auto r3 = b.Broadcast(r0, {2, 2, 2});
+  for (int i = 0; i < 3; ++i) {
+    r3 = b.Add(r1_0, r3, {0});
+    r3 = b.Add(r3, r1_1, {1});
+    r3 = b.Add(r1_2, r3, {2});
+  }
+  r3 = b.Mul(r3, b.ConstantR0<float>(-1));
+
+  auto expected = LiteralUtil::CreateR3<float>(
+      {{{-3 * 1110 - 3, -3 * 1120 - 3}, {-3 * 1210 - 3, -3 * 1220 - 3}},
+       {{-3 * 2110 - 3, -3 * 2120 - 3}, {-3 * 2210 - 3, -3 * 2220 - 3}}});
+
+  ComputeAndCompareLiteral(&b, *expected, {}, ErrorSpec(0.0001));
+}
+
 XLA_TEST_F(BroadcastSimpleTest, InvalidBinaryAndDegenerateBroadcasting) {
   // Binary dimension broadcasting of the smaller lhs ([2, 2] up to [2, 2, 2])
   // results in a shape incompatible with the lhs [2, 3, 1].
@@ -186,8 +220,8 @@ XLA_TEST_F(BroadcastSimpleTest, InvalidBinaryAndDegenerateBroadcasting) {
 
   auto result_status = Execute(&b, {});
   EXPECT_FALSE(result_status.ok());
-  EXPECT_MATCH(result_status.status().error_message(),
-               testing::ContainsRegex("broadcast dimension 0 mismatch"));
+  EXPECT_THAT(result_status.status().error_message(),
+              HasSubstr("broadcast dimension 0 mismatch"));
 }
 
 XLA_TEST_F(BroadcastSimpleTest, InvalidInDimensionBroadcasting) {
@@ -199,9 +233,8 @@ XLA_TEST_F(BroadcastSimpleTest, InvalidInDimensionBroadcasting) {
 
   auto result_status = Execute(&b, {});
   EXPECT_FALSE(result_status.ok());
-  EXPECT_MATCH(
-      result_status.status().error_message(),
-      testing::ContainsRegex("binary op BINOP_ADD with incompatible shapes"));
+  EXPECT_THAT(result_status.status().error_message(),
+              HasSubstr("binary op BINOP_ADD with incompatible shapes"));
 }
 
 XLA_TEST_F(BroadcastSimpleTest, InvalidDegenerateBroadcasting) {
@@ -213,9 +246,8 @@ XLA_TEST_F(BroadcastSimpleTest, InvalidDegenerateBroadcasting) {
 
   auto result_status = Execute(&b, {});
   EXPECT_FALSE(result_status.ok());
-  EXPECT_MATCH(
-      result_status.status().error_message(),
-      testing::ContainsRegex("binary op BINOP_ADD with incompatible shapes"));
+  EXPECT_THAT(result_status.status().error_message(),
+              HasSubstr("binary op BINOP_ADD with incompatible shapes"));
 }
 
 }  // namespace

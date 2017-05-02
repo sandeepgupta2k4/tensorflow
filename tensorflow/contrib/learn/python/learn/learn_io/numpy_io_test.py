@@ -18,13 +18,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import sys
-
-# TODO: #6568 Remove this hack that makes dlopen() not crash.
-if hasattr(sys, 'getdlopenflags') and hasattr(sys, 'setdlopenflags'):
-  import ctypes
-  sys.setdlopenflags(sys.getdlopenflags() | ctypes.RTLD_GLOBAL)
-
 import numpy as np
 
 from tensorflow.contrib.learn.python.learn.learn_io import numpy_io
@@ -256,7 +249,7 @@ class NumpyIoTest(test.TestCase):
           x, y, batch_size=2, shuffle=False, num_epochs=1)
       input_fn()
       self.assertAllEqual(x['__target_key__'], array)
-      self.assertAllEqual(x['__target_key___n'], y)
+      self.assertItemsEqual(x.keys(), ['__target_key__'])
 
   def testNumpyInputFnWithMismatchLengthOfInputs(self):
     a = np.arange(4) * 1.0

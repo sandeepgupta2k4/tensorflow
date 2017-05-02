@@ -137,6 +137,27 @@ Status XlaOpKernelContext::ConstantInputReshaped(
   return Status::OK();
 }
 
+// Converts an int32 or int64 scalar literal to an int64.
+static Status LiteralToInt64Scalar(const xla::Literal& literal, int64* out) {
+  if (xla::ShapeUtil::Rank(literal.shape()) != 0) {
+    return errors::InvalidArgument("value is not a scalar");
+  }
+  if (literal.shape().element_type() == xla::S32) {
+    *out = xla::LiteralUtil::Get<int32>(literal, {});
+  } else if (literal.shape().element_type() == xla::S64) {
+    *out = xla::LiteralUtil::Get<int64>(literal, {});
+  } else {
+    return errors::InvalidArgument("value must be either int32 or int64");
+  }
+  return Status::OK();
+}
+
+Status XlaOpKernelContext::ConstantInputAsIntScalar(int index, int64* out) {
+  xla::Literal literal;
+  TF_RETURN_IF_ERROR(ConstantInput(index, &literal));
+  return LiteralToInt64Scalar(literal, out);
+}
+
 // Converts an int32 or int64 1D literal to an int64 vector.
 static Status LiteralToInt64Vector(const xla::Literal& literal,
                                    std::vector<int64>* out) {
@@ -163,6 +184,31 @@ Status XlaOpKernelContext::ConstantInputAsIntVector(int index,
   xla::Literal literal;
   TF_RETURN_IF_ERROR(ConstantInput(index, &literal));
   return LiteralToInt64Vector(literal, out);
+}
+
+Status XlaOpKernelContext::ConstantInputAsInt64Literal(int index,
+                                                       xla::Literal* out) {
+  xla::Literal literal;
+  TF_RETURN_IF_ERROR(ConstantInput(index, &literal));
+  switch (literal.shape().element_type()) {
+    case xla::S32:
+      out->Clear();
+      *out->mutable_shape() = literal.shape();
+      out->mutable_shape()->set_element_type(xla::S64);
+      for (int32 x : literal.s32s()) {
+        out->add_s64s(x);
+      }
+      return Status::OK();
+
+    case xla::S64:
+      out->Swap(&literal);
+      return Status::OK();
+
+    default:
+      return errors::InvalidArgument(
+          "Invalid argument to ConstantInputAsInt64Literal: ",
+          xla::ShapeUtil::HumanString(literal.shape()));
+  }
 }
 
 // TODO(phawkins): validate that the dimensions form a valid shape, fail
@@ -206,7 +252,51 @@ Status XlaOpKernelContext::ReadVariableInput(
   const Tensor& tensor = context_->input(index);
   const XlaExpression* expression = CastExpressionFromTensor(tensor);
   int variable_id = expression->variable_id();
-  return XlaContext::Get(this).ReadVariable(variable_id, value);
+
+  XlaContext::Variable* variable;
+  XlaContext& context = XlaContext::Get(this);
+  TF_RETURN_IF_ERROR(context.GetVariable(variable_id, &variable));
+  if (variable->value.handle() == 0) {
+    return errors::InvalidArgument("Read of uninitialized variable ",
+                                   variable->name);
+  }
+  *value = variable->value;
+  return Status::OK();
+}
+
+string XlaOpKernelContext::VariableDebugString(int index) {
+  const Tensor& tensor = context_->input(index);
+  const XlaExpression* expression = CastExpressionFromTensor(tensor);
+  int variable_id = expression->variable_id();
+
+  XlaContext::Variable* variable;
+  XlaContext& context = XlaContext::Get(this);
+  if (!context.GetVariable(variable_id, &variable).ok()) {
+    return "<invalid variable ID>";
+  }
+  return variable->name;
+}
+
+Status XlaOpKernelContext::GetVariableTypeAndShape(int index, DataType* type,
+                                                   TensorShape* shape) const {
+  const Tensor& tensor = context_->input(index);
+  const XlaExpression* expression = CastExpressionFromTensor(tensor);
+  int variable_id = expression->variable_id();
+
+  XlaContext::Variable* variable;
+  XlaContext& context = XlaContext::Get(this);
+  TF_RETURN_IF_ERROR(context.GetVariable(variable_id, &variable));
+  if (variable->value.handle() == 0) {
+    return errors::InvalidArgument("Read of uninitialized variable ",
+                                   variable->name);
+  }
+  *type = variable->type;
+  auto shape_or_status = builder()->GetShape(variable->value);
+  if (!shape_or_status.ok()) {
+    return shape_or_status.status();
+  }
+  *shape = XLAShapeToTensorShape(*shape_or_status.ValueOrDie());
+  return Status::OK();
 }
 
 void XlaOpKernelContext::SetOutput(int index,
@@ -272,11 +362,25 @@ Status XlaOpKernelContext::AssignVariable(
   const XlaExpression* expression =
       CastExpressionFromTensor(context_->input(index));
   XlaContext& context = XlaContext::Get(this);
-  return context.AssignVariable(expression->variable_id(), type, handle);
+  XlaContext::Variable* variable;
+  TF_RETURN_IF_ERROR(context.GetVariable(expression->variable_id(), &variable));
+  if (!((variable->type == DT_INVALID && type != DT_INVALID) ||
+        (variable->type == type))) {
+    return errors::InvalidArgument(
+        "Types of variables cannot change after initialization: old type was ",
+        DataTypeString(variable->type), ", new type is ", DataTypeString(type));
+  }
+  variable->type = type;
+  variable->value = handle;
+  return Status::OK();
 }
 
 void XlaOpKernelContext::SetOpHasSideEffects() {
   XlaContext::Get(context_).AddSideEffects();
+}
+
+const XlaCompiler::Options& XlaOpKernelContext::GetCompilerOptions() const {
+  return XlaContext::Get(context_).compiler()->options();
 }
 
 void XlaOpKernelContext::CtxFailure(Status s) { context_->CtxFailure(s); }

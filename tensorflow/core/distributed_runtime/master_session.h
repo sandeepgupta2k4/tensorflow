@@ -19,6 +19,7 @@ limitations under the License.
 #include <atomic>
 #include <vector>
 
+#include "tensorflow/core/common_runtime/debugger_state_interface.h"
 #include "tensorflow/core/common_runtime/device_set.h"
 #include "tensorflow/core/common_runtime/simple_graph_execution_state.h"
 #include "tensorflow/core/common_runtime/stats_publisher_interface.h"
@@ -45,9 +46,10 @@ class MasterSession : public core::RefCounted {
   // operations on these devices.
   //
   // The caller takes ownership of all remote devices.
-  MasterSession(const SessionOptions& options, const MasterEnv* env,
-                std::vector<Device*>* remote_devs,
-                StatsPublisherFactory stats_publisher_factory);
+  MasterSession(
+      const SessionOptions& options, const MasterEnv* env,
+      std::unique_ptr<std::vector<std::unique_ptr<Device>>> remote_devs,
+      StatsPublisherFactory stats_publisher_factory);
 
   // Initialize the MasterSession for "def".  Must be called before Extend(),
   // Run(), or Close().
@@ -103,8 +105,7 @@ class MasterSession : public core::RefCounted {
   // The opaque session handle.
   const string handle_;
 
-  // Owned.
-  std::vector<Device*> remote_devs_;
+  std::unique_ptr<std::vector<std::unique_ptr<Device>>> remote_devs_;
 
   // The device set used by this session.
   DeviceSet devices_;
@@ -116,7 +117,7 @@ class MasterSession : public core::RefCounted {
   std::atomic<int64> partial_run_handle_counter_ = {0};
 
   mutex mu_;
-  std::unique_ptr<SimpleGraphExecutionState> execution_state_;
+  std::unique_ptr<SimpleGraphExecutionState> execution_state_ GUARDED_BY(mu_);
   int64 graph_version_;
 
   // We keep a map from a signature of a run request to the
@@ -141,8 +142,8 @@ class MasterSession : public core::RefCounted {
   };
 
   struct RunState {
-    std::unordered_set<string> pending_inputs;
-    std::unordered_set<string> pending_outputs;
+    std::unordered_map<string, bool> pending_inputs;   // true if fed
+    std::unordered_map<string, bool> pending_outputs;  // true if fetched
     ReffedClientGraph* rcg = nullptr;
     uint64 step_id;
     int64 count = 0;
@@ -153,6 +154,8 @@ class MasterSession : public core::RefCounted {
     RunState(const std::vector<string>& input_names,
              const std::vector<string>& output_names, ReffedClientGraph* rcg,
              const uint64 step_id, const int64 count);
+
+    bool PendingDone() const;
 
     ~RunState();
   };
@@ -173,7 +176,7 @@ class MasterSession : public core::RefCounted {
   int64 next_node_id_ GUARDED_BY(mu_) = 0;
 
   // Used to cancel running steps on Close().
-  CancellationManager* cancellation_manager_;
+  CancellationManager cancellation_manager_;
 
   // Private dtor. The client must call Close().
   virtual ~MasterSession();
@@ -190,6 +193,11 @@ class MasterSession : public core::RefCounted {
   void UpdateLastAccessTime();
 
   Status BuildAndRegisterPartitions(ReffedClientGraph* rcg);
+
+  Status CreateDebuggerState(
+      const DebugOptions& debug_options, const RunStepRequestWrapper& req,
+      int64 rcg_execution_count,
+      std::unique_ptr<DebuggerStateInterface>* debugger_state);
 
   TF_DISALLOW_COPY_AND_ASSIGN(MasterSession);
 };

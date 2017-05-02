@@ -100,6 +100,31 @@ class LiteralUtil {
           values,
       const Layout& layout);
 
+  // Create a new Literal object with the shape specified as parameter.
+  // The content of the literal values is the default value of the primitive
+  // type of literal itself (0 for numeric types, and false for predicates).
+  static std::unique_ptr<Literal> CreateFromShape(const Shape& shape);
+
+  // Create a new Literal object with its values havings the primitive_type
+  // type, and with dimensions defined by the dimensions parameter.
+  // The content of the literal values is the default value of the primitive
+  // type of literal itself (0 for numeric types, and false for predicates).
+  static std::unique_ptr<Literal> CreateFromDimensions(
+      PrimitiveType primitive_type,
+      tensorflow::gtl::ArraySlice<int64> dimensions);
+
+  // Copies the values from src_literal, starting at src_base shape indexes,
+  // to dest_literal, starting at dest_base, where the copy size in each
+  // dimension is specified by copy_size.
+  // The src_literal and dest_literal must have the same primitive type,
+  // src_base+copy_size must fit the source literal dimensions, as well as
+  // dest_base+copy_size must fit the destination literal dimensions.
+  static Status Copy(const Literal& src_literal,
+                     tensorflow::gtl::ArraySlice<int64> src_base,
+                     Literal* dest_literal,
+                     tensorflow::gtl::ArraySlice<int64> dest_base,
+                     tensorflow::gtl::ArraySlice<int64> copy_size);
+
   // Creates a new value that has the equivalent value as literal, but conforms
   // to new_layout; e.g. a literal matrix that was in {0, 1} minor-to-major
   // dimension layout can be re-layed-out as {1, 0} minor-to-major dimension
@@ -257,9 +282,8 @@ class LiteralUtil {
   // like representation in a protobuf).
   static void EachCellAsString(
       const Literal& literal,
-      std::function<void(tensorflow::gtl::ArraySlice<int64> indices,
-                         const string& value)>
-          per_cell);
+      const std::function<void(tensorflow::gtl::ArraySlice<int64> indices,
+                               const string& value)>& per_cell);
   template <typename NativeT>
   static void EachCell(
       const Literal& literal,
@@ -399,6 +423,30 @@ class LiteralUtil {
   static int64 LinearIndex(const Literal& literal,
                            tensorflow::gtl::ArraySlice<int64> multi_index);
 
+  // Internal template helper for the Copy() API, matching its arguments one by
+  // one.
+  //
+  // The double WT template parameter is pretty ugly, but it comes from one of
+  // the gcc versions used for tests, which seems unable to match templates
+  // types uint64 and int64 with tensorflow::protobuf_uint64 and
+  // tensorflow::protobuf_int64, for the GetArraySlice<>() and
+  // GetMutableRepeatedField<>() APIs.
+  // While for the GetArraySlice<>() case the AsUInt64Slice() and
+  // AsInt64Slice() wrappers are taking care via reinterpret_cast<> of the code
+  // pointer parameters, the protocol buffer repeated fields accessories
+  // return a RepeatedField<> pointer, which is not trivially remappable
+  // (unless pretty ugly API forwarder wrapper).
+  // For that gcc version, this creates a mismatch were either things like the
+  // CopyRange<>() API needs to have both specified, or the Get<>() and Set<>()
+  // APIs having to be called with different types (Get<>() with uint64 and
+  // Set<>() with tensorflow::protobuf_uint64).
+  template <typename T, typename WT = T>
+  static Status CopyRange(const Literal& src_literal,
+                          tensorflow::gtl::ArraySlice<int64> src_base,
+                          Literal* dest_literal,
+                          tensorflow::gtl::ArraySlice<int64> dest_base,
+                          tensorflow::gtl::ArraySlice<int64> copy_size);
+
   TF_DISALLOW_COPY_AND_ASSIGN(LiteralUtil);
 };
 
@@ -448,8 +496,11 @@ LiteralUtil::GetMutableRepeatedField<tensorflow::protobuf_int64>(
     Literal* literal);
 
 template <>
-/* static */ tensorflow::gtl::ArraySlice<float>
-LiteralUtil::GetArraySlice<float>(const Literal& literal);
+/* static */ inline tensorflow::gtl::ArraySlice<float>
+LiteralUtil::GetArraySlice<float>(const Literal& literal) {
+  DCHECK(literal.shape().element_type() == F32);
+  return literal.f32s();
+}
 
 template <>
 /* static */ tensorflow::protobuf::RepeatedField<float>*
@@ -814,7 +865,7 @@ template <typename NativeT>
   *literal->mutable_shape() =
       ShapeUtil::MakeShape(PRED, {static_cast<int64>(values.bits())});
   Reserve(values.bits(), literal);
-  for (int64 i = 0; i < values.bits(); ++i) {
+  for (int64 i = 0; i < static_cast<int64>(values.bits()); ++i) {
     Set(literal, {i}, values.get(i));
   }
 }
@@ -1019,22 +1070,41 @@ LiteralUtil::CreateFullWithMonotonicDim0MajorLayout(
 template <typename NativeT>
 /* static */ std::unique_ptr<Literal> LiteralUtil::Replicate(
     const Literal& input, int64 times) {
-  std::vector<int64> bounds = {times};
-  bounds.insert(bounds.end(), input.shape().dimensions().begin(),
-                input.shape().dimensions().end());
+  // Ranks greater than 8 are very rare, so use InlinedVector<int64, 8> to store
+  // the bounds and indices.
+  static constexpr int kInlineRank = 8;
+  tensorflow::gtl::InlinedVector<int64, kInlineRank> bounds = {times};
+  bounds.reserve(input.shape().dimensions_size() + 1);
+  for (int64 bound : input.shape().dimensions()) {
+    bounds.push_back(bound);
+  }
   auto literal = MakeUnique<Literal>();
   *literal->mutable_shape() =
       ShapeUtil::MakeShape(input.shape().element_type(), bounds);
-  Reserve(ShapeUtil::ElementsIn(literal->shape()), literal.get());
-  for (int64 index = 0; index < ShapeUtil::ElementsIn(input.shape()); ++index) {
-    const std::vector<int64> element_indices =
-        IndexUtil::LinearIndexToMultidimensionalIndex(input.shape(), index);
-    const auto element = Get<NativeT>(input, element_indices);
-    for (int64 sample = 0; sample < times; ++sample) {
-      std::vector<int64> output_indices = {sample};
-      output_indices.insert(output_indices.end(), element_indices.begin(),
-                            element_indices.end());
-      Set<NativeT>(literal.get(), output_indices, element);
+  int64 elements = ShapeUtil::ElementsIn(literal->shape());
+  if (elements == 0) {
+    return literal;
+  }
+  Reserve(elements, literal.get());
+
+  tensorflow::gtl::InlinedVector<int64, kInlineRank> output_indices(
+      bounds.size(), 0);
+  tensorflow::gtl::ArraySlice<int64> input_indices = output_indices;
+  input_indices.remove_prefix(1);
+
+  bool done = false;
+  while (!done) {
+    const auto element = Get<NativeT>(input, input_indices);
+    Set<NativeT>(literal.get(), output_indices, element);
+
+    done = true;
+    for (int n = 0; n < output_indices.size(); ++n) {
+      ++output_indices[n];
+      if (output_indices[n] < bounds[n]) {
+        done = false;
+        break;
+      }
+      output_indices[n] = 0;
     }
   }
   return literal;

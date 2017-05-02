@@ -38,6 +38,9 @@ py_binary(
     deps = [
         "//tensorflow/python:platform",
         "//tensorflow/tensorboard/backend:application",
+        "//tensorflow/tensorboard/backend/event_processing:event_file_inspector",
+        "//tensorflow/tensorboard/plugins/projector:projector_plugin",
+        "//tensorflow/tensorboard/plugins/text:text_plugin",
         "@org_pocoo_werkzeug//:werkzeug",
     ],
 )

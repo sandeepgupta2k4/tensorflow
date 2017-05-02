@@ -20,8 +20,6 @@ from __future__ import print_function
 
 import numpy as np
 
-from tensorflow.contrib.distributions.python.ops import distribution
-from tensorflow.contrib.distributions.python.ops import distribution_util
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import check_ops
@@ -29,6 +27,8 @@ from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import random_ops
 from tensorflow.python.ops import special_math_ops
+from tensorflow.python.ops.distributions import distribution
+from tensorflow.python.ops.distributions import util as distribution_util
 
 
 __all__ = [
@@ -153,7 +153,7 @@ class Dirichlet(distribution.Distribution):
       name: Python `str` name prefixed to Ops created by this class.
     """
     parameters = locals()
-    with ops.name_scope(name, values=[concentration]) as ns:
+    with ops.name_scope(name, values=[concentration]):
       self._concentration = self._maybe_assert_valid_concentration(
           ops.convert_to_tensor(concentration, name="concentration"),
           validate_args)
@@ -162,12 +162,11 @@ class Dirichlet(distribution.Distribution):
         dtype=self._concentration.dtype,
         validate_args=validate_args,
         allow_nan_stats=allow_nan_stats,
-        is_continuous=True,
         reparameterization_type=distribution.NOT_REPARAMETERIZED,
         parameters=parameters,
         graph_parents=[self._concentration,
                        self._total_concentration],
-        name=ns)
+        name=name)
 
   @property
   def concentration(self):

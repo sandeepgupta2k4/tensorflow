@@ -19,7 +19,7 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
-#include "tensorflow/core/common_runtime/graph_runner.h"
+#include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/gtl/stl_util.h"
@@ -31,8 +31,17 @@ using shape_inference::DimensionHandle;
 using shape_inference::InferenceContext;
 using shape_inference::ShapeHandle;
 
-ShapeRefiner::ShapeRefiner(const OpRegistryInterface* ops)
-    : ops_registry_(ops) {}
+ShapeRefiner::ShapeRefiner(int graph_def_version,
+                           const OpRegistryInterface* ops)
+    : graph_def_version_(graph_def_version),
+      ops_registry_(ops),
+      graph_runner_(Env::Default()) {}
+
+ShapeRefiner::~ShapeRefiner() {
+  // The lifetime of the tensors are bound to the GraphRunner, so the tensors
+  // should be deleted before it.
+  const_tensor_map_.clear();
+}
 
 Status ShapeRefiner::AddNode(const Node* node) {
   // For each 'input' of this node, fetch the corresponding shape
@@ -71,7 +80,8 @@ Status ShapeRefiner::AddNode(const Node* node) {
   // Get the shape function for this node
   const OpRegistrationData* op_reg_data;
   TF_RETURN_IF_ERROR(ops_registry_->LookUp(node->type_string(), &op_reg_data));
-  if (op_reg_data->shape_inference_fn == nullptr) {
+  if (op_reg_data->shape_inference_fn == nullptr &&
+      require_shape_inference_fns_) {
     return errors::InvalidArgument(
         "No shape inference function exists for op '", node->type_string(),
         "', did you forget to define it?");
@@ -85,15 +95,20 @@ Status ShapeRefiner::AddNode(const Node* node) {
   std::vector<ShapeHandle> input_tensors_as_shapes;
 
   // Create the inference context for this node with the existing input shapes.
-  std::unique_ptr<InferenceContext> c(new InferenceContext(
-      &node->def(), node->op_def(), input_shapes, input_tensors,
-      input_tensors_as_shapes, input_handle_shapes, input_handle_dtypes));
+  std::unique_ptr<InferenceContext> c(
+      new InferenceContext(graph_def_version_, &node->def(), node->op_def(),
+                           input_shapes, input_tensors, input_tensors_as_shapes,
+                           input_handle_shapes, input_handle_dtypes));
   if (!c->construction_status().ok()) {
     return c->construction_status();
   }
 
   // Run the shape inference function, and return if there was an error.
-  TF_RETURN_IF_ERROR(c->Run(op_reg_data->shape_inference_fn));
+  if (op_reg_data->shape_inference_fn) {
+    TF_RETURN_IF_ERROR(c->Run(op_reg_data->shape_inference_fn));
+  } else {
+    TF_RETURN_IF_ERROR(c->Run(shape_inference::UnknownShape));
+  }
 
   // We must run the shape function repeatedly, in case users write
   // shape functions where they only conditionally call input_tensor()
@@ -154,7 +169,11 @@ Status ShapeRefiner::AddNode(const Node* node) {
       // so re-run shape inference.
       c->set_input_tensors(input_tensors);
       c->set_input_tensors_as_shapes(input_tensors_as_shapes);
-      TF_RETURN_IF_ERROR(op_reg_data->shape_inference_fn(c.get()));
+      if (op_reg_data->shape_inference_fn) {
+        TF_RETURN_IF_ERROR(op_reg_data->shape_inference_fn(c.get()));
+      } else {
+        TF_RETURN_IF_ERROR(shape_inference::UnknownShape(c.get()));
+      }
     }
   } while (rerun_shape_fn);
 
@@ -201,6 +220,9 @@ Status ShapeRefiner::EvaluateConstantTensorForEdge(const Node* node,
 
   bool is_constant_graph = false;
   Graph subgraph(ops_registry_);
+  auto versions = subgraph.versions();
+  versions.set_producer(graph_def_version_);
+  subgraph.set_versions(versions);
 
   // We identify the possibly constant subgraph to evaluate by
   // recursively iterating backwards through the inputs to 'node'
@@ -218,9 +240,8 @@ Status ShapeRefiner::EvaluateConstantTensorForEdge(const Node* node,
   std::vector<Tensor> outputs;
   // NOTE; we should pass in a function library runtime if we want
   // to support constant-expression evaluation on functions.
-  Status s = GraphRunner::Run(&subgraph, nullptr /* function_library */,
-                              Env::Default(), const_inputs,
-                              {output_tensor_name}, &outputs);
+  Status s = graph_runner_.Run(&subgraph, nullptr /* function_library */,
+                               const_inputs, {output_tensor_name}, &outputs);
 
   // If all kernels in the constant graph are not registered
   // in the process, GraphRunner::Run may fail, in which case
@@ -277,6 +298,20 @@ Status ShapeRefiner::ExtractConstantSubgraph(
 
     // If the node is stateful, assume the graph is not constant.
     if (current_node->op_def().is_stateful()) {
+      *is_constant_graph = false;
+      return Status::OK();
+    }
+
+    // During construction or import from GraphConstructor, back edges may not
+    // be filled in.  Don't constant fold through merges at all for now.
+    if (IsMerge(current_node)) {
+      *is_constant_graph = false;
+      return Status::OK();
+    }
+
+    // Don't constant fold enter/exit currently either, as it's easy to end
+    // up with a partial frame.
+    if (IsEnter(current_node) || IsExit(current_node)) {
       *is_constant_graph = false;
       return Status::OK();
     }
