@@ -57,7 +57,7 @@ from tensorflow.python.framework import ops
 from tensorflow.python.framework import random_seed
 from tensorflow.python.framework import sparse_tensor
 from tensorflow.python.ops import control_flow_ops
-from tensorflow.python.ops import data_flow_ops
+from tensorflow.python.ops import lookup_ops
 from tensorflow.python.ops import resources
 from tensorflow.python.ops import variables
 from tensorflow.python.platform import gfile
@@ -372,7 +372,6 @@ class BaseEstimator(
       logging.info('Using default config.')
     else:
       self._config = config
-    logging.info('Using config: %s', str(vars(self._config)))
 
     if self._config.session_config is None:
       self._session_config = config_pb2.ConfigProto(allow_soft_placement=True)
@@ -397,6 +396,7 @@ class BaseEstimator(
                       self._model_dir)
     if self._config.model_dir is None:
       self._config = self._config.replace(model_dir=self._model_dir)
+    logging.info('Using config: %s', str(vars(self._config)))
 
     # Set device function depending if there are replicas or not.
     self._device_fn = _get_replica_device_setter(self._config)
@@ -966,7 +966,8 @@ class BaseEstimator(
             saver.Saver(
                 sharded=True,
                 max_to_keep=self._config.keep_checkpoint_max,
-                defer_build=True))
+                defer_build=True,
+                save_relative_paths=True))
 
       chief_hooks = []
       if (self._config.save_checkpoints_secs or
@@ -1291,7 +1292,7 @@ class Estimator(BaseEstimator):
         init_op = control_flow_ops.group(
             variables.local_variables_initializer(),
             resources.initialize_resources(resources.shared_resources()),
-            data_flow_ops.tables_initializer())
+            lookup_ops.tables_initializer())
 
         # Perform the export
         builder = saved_model_builder.SavedModelBuilder(export_dir)

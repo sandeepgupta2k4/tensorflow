@@ -22,6 +22,8 @@ import gc
 import weakref
 
 from tensorflow.core.framework import attr_value_pb2
+from tensorflow.core.framework import types_pb2
+from tensorflow.core.protobuf import config_pb2
 from tensorflow.python.client import session
 from tensorflow.python.framework import common_shapes
 from tensorflow.python.framework import constant_op
@@ -354,6 +356,32 @@ class OperationTest(test_util.TensorFlowTestCase):
     op = ops.Operation(
         ops._NodeDef("noop", "op1"), ops.Graph(), [], [dtypes.float32])
     self.assertEqual("<tf.Operation 'op1' type=noop>", repr(op))
+
+  def testGetAttr(self):
+    list_value = attr_value_pb2.AttrValue.ListValue()
+    list_value.type.append(types_pb2.DT_STRING)
+    list_value.type.append(types_pb2.DT_DOUBLE)
+    op = ops.Operation(
+        ops._NodeDef(
+            "noop",
+            "op1",
+            attrs={
+                "value": attr_value_pb2.AttrValue(i=32),
+                "dtype": attr_value_pb2.AttrValue(type=types_pb2.DT_INT32),
+                "list": attr_value_pb2.AttrValue(list=list_value)
+            }), ops.Graph(), [], [dtypes.int32])
+    self.assertEqual(32, op.get_attr("value"))
+
+    d = op.get_attr("dtype")
+    # First check that d is a DType, because the assertEquals will
+    # work no matter what since DType overrides __eq__
+    self.assertIsInstance(d, dtypes.DType)
+    self.assertEqual(dtypes.int32, d)
+
+    l = op.get_attr("list")
+    for x in l:
+      self.assertIsInstance(x, dtypes.DType)
+    self.assertEqual([dtypes.string, dtypes.double], l)
 
 
 class CreateOpTest(test_util.TensorFlowTestCase):
@@ -1701,6 +1729,27 @@ class NameScopeTest(test_util.TensorFlowTestCase):
           self.assertEqual("scope1/scope2", g.get_name_scope())
         self.assertEqual("scope1", g.get_name_scope())
       self.assertEqual("", g.get_name_scope())
+
+
+class TracebackTest(test_util.TensorFlowTestCase):
+
+  def testTracebackWithStartLines(self):
+    with self.test_session() as sess:
+      a = constant_op.constant(2.0)
+      sess.run(
+          a,
+          options=config_pb2.RunOptions(
+              trace_level=config_pb2.RunOptions.FULL_TRACE))
+      self.assertTrue(sess.graph.get_operations())
+
+      # Tests that traceback_with_start_lines is the same as traceback
+      # but includes one more element at the end.
+      for op in sess.graph.get_operations():
+        self.assertEquals(len(op.traceback), len(op.traceback_with_start_lines))
+        for frame, frame_with_start_line in zip(
+            op.traceback, op.traceback_with_start_lines):
+          self.assertEquals(5, len(frame_with_start_line))
+          self.assertEquals(frame, frame_with_start_line[:-1])
 
 
 if __name__ == "__main__":

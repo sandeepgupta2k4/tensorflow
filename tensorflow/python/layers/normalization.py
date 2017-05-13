@@ -201,6 +201,7 @@ class BatchNormalization(base.Layer):
                 'renorm_stddev_weight', ())
     finally:
       self._scope.set_partitioner(partitioner)
+    self.built = True
 
   def _renorm_correction_and_moments(self, mean, variance, training):
     """Returns the correction and update values for renorm."""
@@ -321,7 +322,7 @@ class BatchNormalization(base.Layer):
 
     def _broadcast(v):
       if needs_broadcasting and v is not None:
-        # In this case we must explictly broadcast all parameters.
+        # In this case we must explicitly broadcast all parameters.
         return array_ops.reshape(v, broadcast_shape)
       return v
 
@@ -364,12 +365,14 @@ def batch_normalization(inputs,
   Note: the operations which update the `moving_mean` and `moving_variance`
   variables will not be added as dependencies of your training operation and so
   must be run separately. For example:
+
   ```
   extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
   sess.run([train_op, extra_update_ops], ...)
   ```
   Alternatively, add the operations as a dependency to your training operation
   manually, and then just run your training operation as normal:
+
   ```
   extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
   with tf.control_dependencies(extra_update_ops):
@@ -399,7 +402,9 @@ def batch_normalization(inputs,
     training: Either a Python boolean, or a TensorFlow boolean scalar tensor
       (e.g. a placeholder). Whether to return the output in training mode
       (normalized with statistics of the current batch) or in inference mode
-      (normalized with moving statistics).
+      (normalized with moving statistics). **NOTE**: make sure to set this
+      parameter correctly, or else your training/inference will not work
+      properly.
     trainable: Boolean, if `True` also add variables to the graph collection
       `GraphKeys.TRAINABLE_VARIABLES` (see tf.Variable).
     name: String, the name of the layer.
